@@ -43,7 +43,7 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 从 Streamlit Secrets 安全获取 API Key 并清洗换行符
+# 获取 API Key
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
 
@@ -66,7 +66,7 @@ def calculate_volume_profile(df_daily, bins=25):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     return list(zip(bin_centers, vol_profile))
 
-# 使用官方 genai 库进行极其聪明的云端自主变通推演
+# AI 生成全维实战行动手册
 def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
                     macro_sentiment_tag, weekly_status, pit_status, hourly_status, vwap_price, 
                     vwap_status_desc, hourly_suggested_entry, hourly_stop_loss, chip_resistances, 
@@ -108,7 +108,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     {news_digest}
 
     【严格输出要求】：
-    1. 所有价格数字统一规范加粗（如 **$18.44**），严禁散落星号。
+    1. 所有价格数字统一规范加粗（如 **$18.44**）。
     2. 下跌吸筹部分必须分为两级：优先提示【第1阶段短线缺口/EMA20浅回调点位】，再提示【第2阶段大级别筹码深回调大底】。
     3. 盈亏比部分直接给大白话定性（划算/不划算），说明为什么。
 
@@ -133,35 +133,10 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
                 res = model.generate_content(prompt)
                 if res and res.text:
                     return res.text
-            except Exception:
-                continue
+            except Exception as e:
+                return f"⚠️ 智脑调用异常: `{e}`。请确认你的 Gemini API Key 是否有效并在新项目中创建。"
 
-    # 本地智能保底推演
-    res1 = chip_resistances[0] if chip_resistances else high_30d
-    res2 = chip_resistances[1] if len(chip_resistances) > 1 else (res1 * 1.08)
-    res_clear = chip_resistances[-1] if len(chip_resistances) > 2 else min(high_52w, res2 * 1.1)
-    sup_short = gap_support if gap_support else (ema20 if ema20 < cur_price else cur_price * 0.985)
-    sup_deep = chip_supports[0] if chip_supports else hourly_suggested_entry
-
-    rr_eval = "🟢 盈亏比优良（≥ 2.0），值得以小博大" if rr_ratio >= 2.0 else "🔴 盈亏比较差（< 2.0），现价不建议盲目追高"
-
-    return f"""
-1. 🚦 **多周期共振、宏观情绪与消息面定性（红绿灯）**：
-当前宏观情绪处于【{macro_sentiment_tag}】，个股运行于日内成本线 (VWAP: **${vwap_price:.2f}**) 附近。消息面整体平稳，短线以多头均线防守为主。
-
-2. 💡 **跌势：小白抄底与分批吸筹指南（跌了怎么买）**：
-- **第一阶段（短线缺口/浅回调 15% 仓位）**：激进短线可关注 **${sup_short:.2f}**（缺口/EMA20共振位），回踩不破且缩量时小仓低吸。
-- **第二阶段（大级别深回调/筹码大底 25% 仓位）**：若遇深度调整，在主力筹码大底 **${sup_deep:.2f}** 附近分批挂单吸筹拉低均价。
-- **飞刀熔断禁买线**：跌破防守线 **${hourly_stop_loss:.2f}** 坚决止损，严禁盲目扛单！
-
-3. 🎯 **涨势：阶梯止盈与突破清仓指南（涨了怎么卖）**：
-- **第一止盈目标（减仓 1/3~1/2）**：反弹触及近端筹码阻力 **${res1:.2f}** 区域主动锁定利润。
-- **突破顺势推仓点**：放量站稳 **${res1:.2f}** 后顺势推仓看至下一目标 **${res2:.2f}**。
-- **大波段终极清仓位**：触及历史大级别阻力平台 **${res_clear:.2f}** 建议全额清仓落袋。
-
-4. ⚖️ **交易质量与盈亏比核验**：
-当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
-"""
+    return "⚠️ 未检测到有效的 Gemini API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
 
 # 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
@@ -573,7 +548,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理
+    # 5. 纯智脑 Gemini 专属 AI 操盘助理（100% 自由智能问答）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 真正挂载 Gemini 智脑，支持数学空间计算、条件假设推演、个股对比与策略变通。")
@@ -601,7 +576,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("Gemini 大脑正在全维变通推演计算中..."):
+            with st.spinner("Gemini 正在深度思考并计算推演中..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 extra_data_text = ""
@@ -659,22 +634,11 @@ if "current_data" in st.session_state and st.session_state.current_data:
                             if chat_resp and chat_resp.text:
                                 reply_text = chat_resp.text
                                 break
-                        except Exception:
-                            time.sleep(0.2)
+                        except Exception as e:
+                            reply_text = f"❌ 智脑连通失败: `{e}`。请检查 API Key 是否有效。"
                             continue
-
-                if not reply_text:
-                    target_p = data['chip_resistances'][0] if data['chip_resistances'] else data['cur_price'] * 1.08
-                    pct_space = ((target_p - data['cur_price']) / data['cur_price']) * 100
-                    sup_p = data.get('gap_support', data['ema20'])
-                    
-                    reply_text = f"""
-老朋友，针对你关心的 **{curr_ticker}**，当前现价 **${data['cur_price']:.2f}**。
-
-1. **目标空间与阻力测算**：上方第一重近端筹码阻力在 **${target_p:.2f}**，从现价冲到该目标位还有 **+{pct_space:.1f}%** 的上涨空间。如果想站稳并突破，必须伴随日内 5 日量比放大（当前量比 **{data['vol_ratio']:.2f}倍**），消化上方套牢盘。
-2. **支撑与吸筹防线**：短线重点关注跳空缺口与生命线共振支撑 **${sup_p:.2f}**。只要在这个位置附近缩量企稳，就是非常健康的右侧分批吸筹良机。
-3. **盈亏比定性**：当前动态测算盈亏比为 **{data['rr_ratio']:.2f} : 1**，{'🟢 整体盈亏比优秀，值得以小博大。' if data['rr_ratio'] >= 2.0 else '⚠️ 当前位置风险收益比一般，建议耐心等待回踩再出手。'}
-                    """
+                else:
+                    reply_text = "⚠️ 未检测到 API Key，请在 Streamlit 后台配置 Secrets。"
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
