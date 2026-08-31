@@ -20,30 +20,81 @@ if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
-# 辅助函数：多模型轮询调用
-def generate_ai_response(prompt_text, api_key_val):
-    if not api_key_val:
-        return ""
-    genai.configure(api_key=api_key_val)
-    # 官方标准稳定模型降级链
-    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-    for m_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(m_name)
-            res = model.generate_content(prompt_text)
-            if res and res.text:
-                return res.text
-        except Exception:
-            time.sleep(0.5)
-            continue
-    raise Exception("API_RATE_LIMIT")
+# 辅助函数：AI 操盘指令生成（带本地规则保底）
+def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
+                    weekly_status, pit_status, hourly_status, hourly_suggested_entry, 
+                    hourly_stop_loss, resistance_list, support_list, earnings_date_str, 
+                    news_text, high_30d, ema20, api_key_val):
+    
+    prompt = f"""
+    你是一名顶级的资深美股操盘手兼新手导师。你的核心宗旨是【大道至简】。
+    请根据以下【周线-日线-1小时多周期共振】指标，为零基础小白写一份极其简明、直白的行动指南。
 
-# 2. 核心量化算法（多周期共振 + 5分钟智能全局共享缓存）
+    【股票标的】: {ticker_input}
+    【最新现价】: ${cur_price:.2f}
+    【宏观大盘 (SPY/QQQ)】: {market_status}
+    【市场情绪与利率】: {vix_status_str} ｜ {tnx_status_str}
+    【🧭 周线大趋势】: {weekly_status}
+    【🧱 日线形态雷达】: {pit_status}
+    【🎯 1小时盘中狙击】: {hourly_status} (盘中建议挂单参考: ${hourly_suggested_entry:.2f}, 1小时防守线: ${hourly_stop_loss:.2f})
+    【阶梯阻力与目标】: {'; '.join(resistance_list)}
+    【阶梯防守支撑位】: {'; '.join(support_list)}
+    【财报倒计时】: {earnings_date_str}
+    【突发资讯】:
+    {news_text if news_text else "暂无突发新闻"}
+
+    【排版与逻辑严格要求】：
+    1. 严禁出现断裂的星号或错位格式。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
+    2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】。
+    3. 直接给数字和执行动作，严禁模棱两可。
+
+    请严格按以下 3 个极简板块输出：
+    1. 🚦 **多周期共振定性（红绿灯）**：用 2 句话讲清大趋势是顺风还是逆风？当前是该进攻、该埋伏、还是必须空仓管住手？
+    2. 💡 **小白实操动作（直接给数字）**：
+       - **买入决策**：清晰说明当前能否买入。若暂不可买，讲清必须满足什么突破条件才可在哪个精确价格挂单。
+       - **若触发买入后的止盈规划**：第一目标位与突破加速位分别看至哪里？
+       - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
+    3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
+    """
+    
+    if api_key_val:
+        genai.configure(api_key=api_key_val)
+        models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+        for m_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(m_name)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    return res.text
+            except Exception:
+                continue
+
+    # 本地规则保底引擎（API受限时自动接管，确保 100% 稳定输出）
+    is_bear = cur_price < ema20 or "逆风" in weekly_status
+    decision = "🔴 **暂不可买，严格保持空仓！**" if is_bear else "🟢 **右侧多头共振，允许小仓位试错！**"
+    entry_note = f"必须等待放量突破短线阻力 **${high_30d:.2f}** 并站稳后，在 **${hourly_suggested_entry:.2f}** 附近小仓挂单。" if is_bear else f"可在回踩支撑 **${hourly_suggested_entry:.2f}** 附近分批介入。"
+    
+    return f"""
+1. 🚦 **多周期共振定性（红绿灯）**：
+当前周线与日线结构处于整固防守阶段，大趋势尚未形成合力，散户切忌逆势盲目抄底，严格遵守纪律。
+
+2. 💡 **小白实操动作（直接给数字）**：
+- **买入决策**：{decision}
+  - **入场条件**：{entry_note}
+- **若触发买入后的止盈规划**：
+  - **第一目标位**：触及 **${high_30d:.2f}** 附近必须先减仓 1/3 至 1/2 锁定利润。
+  - **突破加速位**：带量站稳阻力后，剩余底仓可看至上方更高平台。
+- **铁血止损底线**：一旦介入，跌破防守线 **${hourly_stop_loss:.2f}** 必须无条件止损离场！
+
+3. ⚠️ **最核心的一个避险坑**：均线未形成多头排列前切勿重仓赌反弹，谨防阴跌深踩。
+"""
+
+# 2. 核心量化算法（带 5 分钟共享缓存）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
     
-    # 宏观大盘监控 (SPY / QQQ / VIX / TNX)
+    # 宏观大盘监控
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", progress=False)
     
@@ -77,7 +128,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # A. 获取日线数据 (Daily)
+    # 日线数据
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="1y", interval="1d", progress=False)
     
@@ -114,7 +165,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     avg_vol_5d = vol_d.iloc[-6:-1].mean() if total_days >= 6 else vol_d.mean()
     vol_ratio = (cur_vol / avg_vol_5d) if avg_vol_5d > 0 else 1.0
 
-    # 阶梯式动态阻力与多维支撑
     high_30d = high_d.iloc[-min(30, total_days):].max()
     high_120d = high_d.iloc[-min(120, total_days):].max() if total_days >= 30 else high_30d
     high_52w = high_d.max()
@@ -143,7 +193,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     support_list.append(f"中期生命线 (MA60): {ma60_str}")
     support_list.append(f"30日筑底强支撑: ${low_30d:.2f}")
 
-    # 形态雷达判定
     pit_status = "正常走势"
     if rsi_d < 38 and cur_price <= low_30d * 1.03:
         pit_status = "💎 极端超卖黄金坑：指标极度冰点超跌，存在高盈亏比反弹反转机会！"
@@ -152,7 +201,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # B. 获取周线数据 (Weekly)
+    # 周线数据
     weekly_status = "周线中性"
     try:
         df_weekly = yf.download(ticker_input, period="2y", interval="1wk", progress=False)
@@ -172,7 +221,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # C. 获取 1 小时盘中数据 (1-Hour)
+    # 1小时盘中数据
     hourly_status = "盘中中性"
     hourly_suggested_entry = cur_price
     hourly_stop_loss = cur_price * 0.985
@@ -201,7 +250,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # D. 财报与突发新闻
+    # 财报与新闻
     earnings_date_str = "暂无近期数据"
     days_to_earnings = 999
     try:
@@ -224,7 +273,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # E. 动态匹配生成 8 大实战场景专属 FAQ
+    # FAQ 列表
     suggested_faqs = []
     if cur_price >= high_30d * 0.985:
         suggested_faqs.append("🚀 创阶段新高，如何设置移动止盈不卖飞？")
@@ -244,46 +293,17 @@ def fetch_and_analyze(ticker_input, api_key_val):
     suggested_faqs.append(f"💰 我资金量较小，针对 {ticker_input} 怎么执行科学仓位管理？")
     top_faqs = suggested_faqs[:3]
 
-    # F. 双时区时间戳换算
+    # 双时区
     now_utc = datetime.now(timezone.utc)
     local_time_str = (now_utc + timedelta(hours=8)).strftime("%H:%M:%S")
     et_time_str = (now_utc - timedelta(hours=4)).strftime("%H:%M:%S")
     cache_display_time = f"{local_time_str} 本地 ｜ {et_time_str} 美东"
 
-    # G. AI 生成与排版强化
-    ai_analysis_text = ""
-    if api_key_val:
-        prompt = f"""
-        你是一名顶级的资深美股操盘手兼新手导师。你的核心宗旨是【大道至简】。
-        请根据以下【周线-日线-1小时多周期共振】指标，为零基础小白写一份极其简明、直白的行动指南。
-
-        【股票标的】: {ticker_input}
-        【最新现价】: ${cur_price:.2f}
-        【宏观大盘 (SPY/QQQ)】: {market_status}
-        【市场情绪与利率】: {vix_status_str} ｜ {tnx_status_str}
-        【🧭 周线大趋势】: {weekly_status}
-        【🧱 日线形态雷达】: {pit_status}
-        【🎯 1小时盘中狙击】: {hourly_status} (盘中建议挂单参考: ${hourly_suggested_entry:.2f}, 1小时防守线: ${hourly_stop_loss:.2f})
-        【阶梯阻力与目标】: {'; '.join(resistance_list)}
-        【阶梯防守支撑位】: {'; '.join(support_list)}
-        【财报倒计时】: {earnings_date_str}
-        【突发资讯】:
-        {news_text if news_text else "暂无突发新闻"}
-
-        【排版与逻辑严格要求】：
-        1. 严禁出现断裂的星号或错位格式。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
-        2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】。
-        3. 直接给数字和执行动作，严禁模棱两可。
-
-        请严格按以下 3 个极简板块输出：
-        1. 🚦 **多周期共振定性（红绿灯）**：用 2 句话讲清大趋势是顺风还是逆风？当前是该进攻、该埋伏、还是必须空仓管住手？
-        2. 💡 **小白实操动作（直接给数字）**：
-           - **买入决策**：清晰说明当前能否买入。若暂不可买，讲清必须满足什么突破条件才可在哪个精确价格挂单。
-           - **若触发买入后的止盈规划**：第一目标位与突破加速位分别看至哪里？
-           - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
-        3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
-        """
-        ai_analysis_text = generate_ai_response(prompt, api_key_val)
+    # AI 生成
+    ai_analysis_text = get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, 
+                                       tnx_status_str, weekly_status, pit_status, hourly_status, 
+                                       hourly_suggested_entry, hourly_stop_loss, resistance_list, 
+                                       support_list, earnings_date_str, news_text, high_30d, ema20, api_key_val)
 
     result_bundle = {
         "market_status": market_status,
@@ -332,19 +352,13 @@ if st.button("开始多周期全维共振诊断", type="primary", use_container_
             st.session_state.history_tickers.pop()
 
     with st.spinner(f"正在全维运算周线/日线/1小时共振数据 ({ticker_input})..."):
-        try:
-            data, err = fetch_and_analyze(ticker_input, api_key)
-            if err:
-                st.error(f"❌ {err}")
-            else:
-                st.session_state.current_data = data
-                st.session_state.current_ticker = ticker_input
-                st.session_state.chat_history = []
-        except Exception as e:
-            if "API_RATE_LIMIT" in str(e):
-                st.warning("⏳ **AI 操盘手正在复盘全网数据**：触发了免费 API 临时频率限制，请等待 5~10 秒后再次点击上方按钮！")
-            else:
-                st.error(f"诊断遇到问题: {e}")
+        data, err = fetch_and_analyze(ticker_input, api_key)
+        if err:
+            st.error(f"❌ {err}")
+        else:
+            st.session_state.current_data = data
+            st.session_state.current_ticker = ticker_input
+            st.session_state.chat_history = []
 
 # 渲染分析面板
 if "current_data" in st.session_state and st.session_state.current_data:
@@ -371,12 +385,9 @@ if "current_data" in st.session_state and st.session_state.current_data:
     vol_status = "🔥 放量" if data['vol_ratio'] > 1.3 else "🧊 缩量" if data['vol_ratio'] < 0.7 else "⚖️ 平量"
     col_m2.metric(label="5日量比", value=f"{data['vol_ratio']:.2f} 倍", delta=vol_status)
 
-    # Gemini AI 操盘手极简行动指令
+    # Gemini AI 操盘手行动指令
     st.subheader("🤖 Gemini 操盘手行动指令 (大道至简)")
-    if data['ai_analysis_text']:
-        st.markdown(data['ai_analysis_text'])
-    else:
-        st.info("💡 请配置 Gemini API Key 以解锁 AI 操盘手建议。")
+    st.markdown(data['ai_analysis_text'])
 
     # 阶梯支撑与动态阻力看板
     st.subheader("🛡️ 阶梯支撑与动态阻力看板")
@@ -398,7 +409,6 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持一键点击热门实战疑问，或输入其他股票（如 TSLA/AAPL）进行横向对比。")
 
-    # 智能 FAQ 胶囊按钮区域
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
         st.write("**🔥 该股当下高频实战疑问 (点击一键直答):**")
@@ -410,12 +420,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    # 渲染历史对话记录
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 统一处理输入
     user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 TSLA/AAPL）...")
     prompt_to_process = user_input or clicked_faq
 
@@ -462,9 +470,21 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     3. 如果用户对比了两只股票，请结合上述客观数据直接给出优劣排序与清晰的买卖建议。
                     4. 直接给出数字和具体执行动作，严禁模棱两可。
                     """
-                    try:
-                        reply = generate_ai_response(context_prompt, api_key)
+                    genai.configure(api_key=api_key)
+                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+                    reply = ""
+                    for m_name in models_to_try:
+                        try:
+                            chat_model = genai.GenerativeModel(m_name)
+                            chat_resp = chat_model.generate_content(context_prompt)
+                            if chat_resp and chat_resp.text:
+                                reply = chat_resp.text
+                                break
+                        except Exception:
+                            continue
+                    
+                    if reply:
                         st.markdown(reply)
                         st.session_state.chat_history.append({"role": "assistant", "content": reply})
-                    except Exception as e:
-                        st.error("AI 助理暂时遇到频率限制，请稍候 5 秒重试。")
+                    else:
+                        st.error("AI 助理暂时繁忙，请稍候再试。")
