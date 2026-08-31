@@ -5,11 +5,10 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 import time
 import re
-import requests
-import json
 from ta.trend import EMAIndicator, SMAIndicator, MACD
 from ta.momentum import RSIIndicator
 from ta.volatility import AverageTrueRange
+import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (全维智能实战版)")
@@ -44,8 +43,9 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 直接绑定你的 AQ. 令牌
-api_key = "AQ.Ab8RN6JtsTSa2HdqziFRknUpPNumcEcOQcNZhIvyO9o1zTNCUw"
+# 从 Streamlit Secrets 安全获取 API Key 并清洗换行符
+raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
+api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -66,28 +66,7 @@ def calculate_volume_profile(df_daily, bins=25):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     return list(zip(bin_centers, vol_profile))
 
-# 适配 AQ. 令牌的直连大模型调用函数（完美支持云端变通推演）
-def call_gemini_api(prompt_text):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt_text}]
-        }]
-    }
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            res_json = response.json()
-            return res_json['candidates'][0]['content']['parts'][0]['text']
-    except Exception:
-        pass
-    return None
-
-# AI 操盘推演生成
+# 使用官方 genai 库进行极其聪明的云端自主变通推演
 def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
                     macro_sentiment_tag, weekly_status, pit_status, hourly_status, vwap_price, 
                     vwap_status_desc, hourly_suggested_entry, hourly_stop_loss, chip_resistances, 
@@ -113,7 +92,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     你是一名顶级实战派美股操盘手兼新手导师。核心宗旨是【大道至简、双向闭环、大白话教学、严控盈亏比】。
     请基于以下【技术指标 + 缺口/EMA20支撑 + 筹码大底 + 宏观情绪 + 实时新闻舆情】，为小白推演交易行动手册：
 
-    【股票标D】: {ticker_input} ｜ 最新价: ${cur_price:.2f}
+    【股票标的】: {ticker_input} ｜ 最新价: ${cur_price:.2f}
     【宏观大盘与情绪】: {market_status} ｜ 宏观情绪: {macro_sentiment_tag} (VIX: {vix_status_str} ｜ {tnx_status_str})
     【🧭 周线趋势】: {weekly_status} ｜ 【🧱 日线形态】: {pit_status}
     【⚖️ 日内持仓成本 (VWAP)】: ${vwap_price:.2f} ({vwap_status_desc})
@@ -146,9 +125,16 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     4. ⚖️ **交易质量与盈亏比核验**：直接给结论（划算/不划算），用生活化语言讲透为什么。
     """
     
-    cloud_result = call_gemini_api(prompt)
-    if cloud_result:
-        return cloud_result
+    if api_key:
+        genai.configure(api_key=api_key)
+        for m_name in ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']:
+            try:
+                model = genai.GenerativeModel(m_name)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    return res.text
+            except Exception:
+                continue
 
     # 本地智能保底推演
     res1 = chip_resistances[0] if chip_resistances else high_30d
@@ -633,40 +619,51 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         except Exception:
                             pass
 
-                news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
-                
-                context_prompt = f"""
-                你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
-                
-                【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
-                【宏观环境】: {data['market_status']} ｜ 情绪: {data['macro_sentiment_tag']}
-                【实时资讯】:
-                {news_brief}
-                【日内成本 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
-                【均线体系】: EMA20: ${data.get('ema20', 0):.2f} ｜ MA30: ${data.get('ma30', 0):.2f} ｜ MA60: {data.get('ma60_str', '无')} ｜ MA250: {data.get('ma250_str', '无')}
-                【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘: ${data.get('prev_close_p', data['cur_price']):.2f})
-                【波段筹码大底】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
-                【全景密集阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
-                【1小时参考买点】: ${data['hourly_suggested_entry']:.2f} ｜ 止损防线: ${data['hourly_stop_loss']:.2f}
-                【动态盈亏比】: {data['rr_ratio']:.2f} : 1
-                {extra_data_text}
+                if api_key:
+                    genai.configure(api_key=api_key)
+                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
+                    
+                    context_prompt = f"""
+                    你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
+                    
+                    【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
+                    【宏观环境】: {data['market_status']} ｜ 情绪: {data['macro_sentiment_tag']}
+                    【实时资讯】:
+                    {news_brief}
+                    【日内成本 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
+                    【均线体系】: EMA20: ${data.get('ema20', 0):.2f} ｜ MA30: ${data.get('ma30', 0):.2f} ｜ MA60: {data.get('ma60_str', '无')} ｜ MA250: {data.get('ma250_str', '无')}
+                    【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘: ${data.get('prev_close_p', data['cur_price']):.2f})
+                    【波段筹码大底】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
+                    【全景密集阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
+                    【1小时参考买点】: ${data['hourly_suggested_entry']:.2f} ｜ 止损防线: ${data['hourly_stop_loss']:.2f}
+                    【动态盈亏比】: {data['rr_ratio']:.2f} : 1
+                    {extra_data_text}
 
-                用户的真实提问是: "{prompt_to_process}"
+                    用户的真实提问是: "{prompt_to_process}"
 
-                【严格执行规则】：
-                1. 严禁使用任何机械模版！彻底根据用户的具体提问进行针对性解答：
-                   - 如果用户问“到某个价格有多少% / 空间多少”，请直接进行精确数学计算并给出百分比，同时点评突破难度；
-                   - 如果用户问“能不能站回某价”，请分析上方的套牢盘抛压、突破所需的放量条件与确认动作；
-                   - 如果用户问“跌破某支撑怎么办”，请从跌破价格向下推演更低的接力支撑与止损纪律；
-                   - 如果用户问“盈亏比”，用大白话直接给结论（划算/不划算）。
-                2. 所有涉及的价格数字统一紧跟美元符号加粗（如 **$230.47**，**+4.9%**）。
-                3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
-                """
-                
-                cloud_reply = call_gemini_api(context_prompt)
-                if cloud_reply:
-                    reply_text = cloud_reply
-                else:
+                    【严格执行规则】：
+                    1. 严禁使用任何机械模版！彻底根据用户的具体提问进行针对性解答：
+                       - 如果用户问“到某个价格有多少% / 空间多少”，请直接进行精确数学计算并给出百分比，同时点评突破难度；
+                       - 如果用户问“能不能站回某价”，请分析上方的套牢盘抛压、突破所需的放量条件与确认动作；
+                       - 如果用户问“跌破某支撑怎么办”，请从跌破价格向下推演更低的接力支撑与止损纪律；
+                       - 如果用户问“盈亏比”，用大白话直接给结论（划算/不划算）。
+                    2. 所有涉及的价格数字统一紧跟美元符号加粗（如 **$230.47**，**+4.9%**）。
+                    3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
+                    """
+                    
+                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+                    for m_name in models_to_try:
+                        try:
+                            chat_model = genai.GenerativeModel(m_name)
+                            chat_resp = chat_model.generate_content(context_prompt)
+                            if chat_resp and chat_resp.text:
+                                reply_text = chat_resp.text
+                                break
+                        except Exception:
+                            time.sleep(0.2)
+                            continue
+
+                if not reply_text:
                     target_p = data['chip_resistances'][0] if data['chip_resistances'] else data['cur_price'] * 1.08
                     pct_space = ((target_p - data['cur_price']) / data['cur_price']) * 100
                     sup_p = data.get('gap_support', data['ema20'])
