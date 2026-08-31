@@ -13,6 +13,13 @@ st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (多周期全维量化版)")
 st.caption("⚡ 5分钟全网共享缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击 ｜ 💬 智能FAQ与跨标的追问")
 
+# 安全渲染 Markdown（彻底解决 $ 符号打碎加粗星号的 LaTeX 冲突）
+def safe_render_markdown(text):
+    if not text:
+        return
+    clean_text = text.replace("$", "\\$")
+    st.markdown(clean_text)
+
 # 1. 获取 API Key (优先读取 Streamlit Secrets)
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
@@ -430,7 +437,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
     # Gemini AI 操盘手行动指令
     st.subheader("🤖 Gemini 操盘手行动指令 (大道至简)")
-    st.markdown(data['ai_analysis_text'])
+    safe_render_markdown(data['ai_analysis_text'])
 
     # 阶梯支撑与动态阻力看板
     st.subheader("🛡️ 阶梯支撑与动态阻力看板")
@@ -465,7 +472,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            safe_render_markdown(msg["content"])
 
     user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 TSLA/AAPL）...")
     prompt_to_process = user_input or clicked_faq
@@ -473,7 +480,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     if prompt_to_process:
         st.session_state.chat_history.append({"role": "user", "content": prompt_to_process})
         with st.chat_message("user"):
-            st.markdown(prompt_to_process)
+            safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
             with st.spinner("AI 操盘手正在推演解答..."):
@@ -522,5 +529,5 @@ if "current_data" in st.session_state and st.session_state.current_data:
                 if not reply_text:
                     reply_text = fallback_chat_answer(prompt_to_process, curr_ticker, data['cur_price'], data)
 
-                st.markdown(reply_text)
+                safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
