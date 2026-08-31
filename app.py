@@ -13,6 +13,19 @@ st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (多周期全维量化版)")
 st.caption("⚡ 5分钟全网共享缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击 ｜ 💬 智能FAQ与跨标的追问")
 
+# 1. 常用中英文名称到美股代码的别名映射字典
+TICKER_ALIASES = {
+    "TESLA": "TSLA", "特斯拉": "TSLA",
+    "APPLE": "AAPL", "苹果": "AAPL",
+    "NVIDIA": "NVDA", "英伟达": "NVDA",
+    "GOOGLE": "GOOGL", "谷歌": "GOOGL",
+    "AMAZON": "AMZN", "亚马逊": "AMZN",
+    "MICROSOFT": "MSFT", "微软": "MSFT",
+    "META": "META", "脸书": "META",
+    "SPACEX": "SPCX",
+    "AMD": "AMD", "超微": "AMD"
+}
+
 # 安全渲染 Markdown（彻底解决 $ 符号打碎加粗星号的 LaTeX 冲突）
 def safe_render_markdown(text):
     if not text:
@@ -20,7 +33,19 @@ def safe_render_markdown(text):
     clean_text = text.replace("$", "\\$")
     st.markdown(clean_text)
 
-# 1. 获取 API Key (优先读取 Streamlit Secrets)
+# 提取文本中的美股标的代码
+def extract_tickers_from_text(input_text):
+    text_upper = input_text.upper()
+    found_symbols = set()
+    for name, sym in TICKER_ALIASES.items():
+        if name in text_upper or name in input_text:
+            found_symbols.add(sym)
+    words = re.findall(r'\b[A-Z]{2,5}\b', text_upper)
+    for w in words:
+        found_symbols.add(w)
+    return found_symbols
+
+# 1. 获取 API Key
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
 if not api_key:
@@ -97,10 +122,27 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 """
 
 # 辅助函数：AI 问答保底推演引擎
-def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data):
-    res_top = data['resistance_list'][0] if data['resistance_list'] else ""
-    sup_top = data['support_list'][0] if data['support_list'] else ""
+def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
+    res_top = data['resistance_list'][0] if data['resistance_list'] else "暂无关键阻力"
+    sup_top = data['support_list'][0] if data['support_list'] else f"近期防守位 ${data['hourly_stop_loss']:.2f}"
     
+    if compared_ticker_data:
+        comp_sym = compared_ticker_data['symbol']
+        comp_price = compared_ticker_data['cur_price']
+        comp_weekly = compared_ticker_data['weekly_status']
+        comp_pit = compared_ticker_data['pit_status']
+        
+        return f"""
+针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）与 **{comp_sym}**（现价 **${comp_price:.2f}**）的量化横向对比：
+
+1. **趋势强度对比**：
+   - **{curr_ticker}**：周线处于 `{data['weekly_status']}`，日线形态为 `{data['pit_status']}`。
+   - **{comp_sym}**：周线处于 `{comp_weekly}`，日线形态为 `{comp_pit}`。
+2. **多空优劣定性**：
+   - 若 **{comp_sym}** 处于均线上方顺风大牛势，其右侧确定性显著优于处于逆风磨底的 **{curr_ticker}**。
+3. **小白实操建议**：在大盘走弱环境下，优先配置周线顺风、放量突破的强势龙头（如 **{comp_sym}**），对处于均线下方的弱势股保持空仓观望。
+"""
+
     if "止损" in prompt_text or "EMA20" in prompt_text:
         return f"""
 针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）处于 EMA20 下方的反弹策略：
@@ -139,7 +181,7 @@ def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data):
 💡 **操盘建议**：当前市场环境下，严格按支撑阻力位执行分批挂单与止损纪律，切勿盲目追涨杀跌。
 """
 
-# 2. 核心量化算法（带 5 分钟共享缓存）
+# 2. 核心量化算法（带 5 分钟共享缓存与严格动态均线归类）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
@@ -203,8 +245,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     ema10 = EMAIndicator(close_d, min(10, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close_d, min(20, total_days)).ema_indicator().iloc[-1]
     has_ma60 = total_days >= 60
-    ma60 = SMAIndicator(close_d, 60).sma_indicator().iloc[-1] if has_ma60 else ema20
-    ma60_str = f"${ma60:.2f}" if has_ma60 else "上市未满60日"
+    ma60 = SMAIndicator(close_d, 60).sma_indicator().iloc[-1] if has_ma60 else None
     
     rsi_d = RSIIndicator(close_d, min(14, total_days)).rsi().iloc[-1]
     macd_obj_d = MACD(close_d)
@@ -220,7 +261,25 @@ def fetch_and_analyze(ticker_input, api_key_val):
     high_52w = high_d.max()
     low_30d = low_d.iloc[-min(30, total_days):].min()
     
+    # 严格动态判定阻力与支撑（高于现价归入阻力，低于现价归入支撑）
     resistance_list = []
+    support_list = []
+
+    # 1. 均线归类
+    if ema5 > cur_price: resistance_list.append(f"短线压制 (EMA5): ${ema5:.2f}")
+    else: support_list.append(f"超短支撑 (EMA5): ${ema5:.2f}")
+
+    if ema10 > cur_price: resistance_list.append(f"过渡均线压制 (EMA10): ${ema10:.2f}")
+    else: support_list.append(f"过渡防守 (EMA10): ${ema10:.2f}")
+
+    if ema20 > cur_price: resistance_list.append(f"多空分水岭压制 (EMA20): ${ema20:.2f}")
+    else: support_list.append(f"多空分水岭支撑 (EMA20): ${ema20:.2f}")
+
+    if ma60:
+        if ma60 > cur_price: resistance_list.append(f"中期生命线压制 (MA60): ${ma60:.2f}")
+        else: support_list.append(f"中期生命线支撑 (MA60): ${ma60:.2f}")
+
+    # 2. 结构高低点归类
     if cur_price >= high_30d * 0.99:
         if high_120d > cur_price * 1.01:
             resistance_list.append(f"🔥 突破30日高点！下一阻力锁定【半年高点】: ${high_120d:.2f}")
@@ -228,20 +287,17 @@ def fetch_and_analyze(ticker_input, api_key_val):
             resistance_list.append(f"🔥 突破阶段平台！下一阻力锁定【52周历史大顶】: ${high_52w:.2f}")
         else:
             ath_target = cur_price + (1.5 * atr_d)
-            resistance_list.append(f"🚀 创历史新高（上方无套牢盘）！动能拓展目标位: ${ath_target:.2f}")
+            resistance_list.append(f"🚀 创历史新高！动能拓展目标位: ${ath_target:.2f}")
     else:
         resistance_list.append(f"30日阶段强阻力: ${high_30d:.2f}")
         if high_120d > high_30d:
             resistance_list.append(f"半年期重要阻力: ${high_120d:.2f}")
     
-    support_list = []
-    if ema5 < cur_price: support_list.append(f"超短支撑 (EMA5): ${ema5:.2f}")
-    else: resistance_list.insert(0, f"短线均线阻力 (EMA5): ${ema5:.2f}")
-    
-    support_list.append(f"过渡防守 (EMA10): ${ema10:.2f}")
-    support_list.append(f"多空分水岭 (EMA20): ${ema20:.2f}")
-    support_list.append(f"中期生命线 (MA60): {ma60_str}")
-    support_list.append(f"30日筑底强支撑: ${low_30d:.2f}")
+    if low_30d < cur_price:
+        support_list.append(f"30日筑底强支撑: ${low_30d:.2f}")
+
+    if not support_list:
+        support_list.append(f"近期防守底线: ${low_30d:.2f}")
 
     pit_status = "正常走势"
     if rsi_d < 38 and cur_price <= low_30d * 1.03:
@@ -289,7 +345,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
                 h_recent_low = low_h.iloc[-20:].min()
                 
                 hourly_suggested_entry = h_ema20 if cur_price > h_ema20 else cur_price
-                hourly_stop_loss = h_recent_low * 0.995
+                hourly_stop_loss = min(h_recent_low * 0.995, cur_price * 0.98)
                 
                 if cur_price >= h_ema20 and 45 <= h_rsi <= 65:
                     hourly_status = "🎯 盘中狙击买点已触发：1小时结构回踩企稳，极具盈亏比！"
@@ -356,6 +412,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
                                        support_list, earnings_date_str, news_text, high_30d, ema20, api_key_val)
 
     result_bundle = {
+        "symbol": ticker_input,
         "market_status": market_status,
         "vix_status_str": vix_status_str,
         "tnx_status_str": tnx_status_str,
@@ -454,10 +511,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（全自动保底）
+    # 5. 专属 AI 操盘助理（全自动多标的保底）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
-    st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持一键点击热门实战疑问，或输入其他股票（如 TSLA/AAPL）进行横向对比。")
+    st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持输入中文名/代码（如 对比tesla / 对比NVDA）进行横向对比。")
 
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
@@ -474,7 +531,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 TSLA/AAPL）...")
+    user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 对比TSLA/苹果）...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -485,23 +542,30 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message("assistant"):
             with st.spinner("AI 操盘手正在推演解答..."):
                 reply_text = ""
+                extracted_symbols = extract_tickers_from_text(prompt_to_process)
+                compared_ticker_data = None
+                extra_data_text = ""
                 
+                # 获取被对比标的的最新数据
+                for sym in extracted_symbols:
+                    if sym != curr_ticker:
+                        try:
+                            other_data, _ = fetch_and_analyze(sym, api_key)
+                            if other_data:
+                                compared_ticker_data = other_data
+                                extra_data_text += f"""
+                                【提及标的 {sym} 最新量化数据】:
+                                现价: ${other_data['cur_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
+                                关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
+                                """
+                        except Exception:
+                            pass
+
                 # 尝试调用多通道 Gemini
                 if api_key:
                     genai.configure(api_key=api_key)
                     models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
                     
-                    words = re.findall(r'\b[A-Z]{2,5}\b', prompt_to_process.upper())
-                    extra_data_text = ""
-                    for sym in set(words):
-                        if sym != curr_ticker:
-                            try:
-                                other_data, _ = fetch_and_analyze(sym, api_key)
-                                if other_data:
-                                    extra_data_text += f"\n【{sym} 数据】: 现价: ${other_data['cur_price']:.2f}, 周线: {other_data['weekly_status']}, 日线: {other_data['pit_status']}"
-                            except Exception:
-                                pass
-
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼新手导师，秉承【大道至简】的教学风格。
                     当前标的: {curr_ticker}，现价: ${data['cur_price']:.2f}。
@@ -513,7 +577,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
                     要求：
                     1. 价格严格规范加粗（如 **$18.04**）。
-                    2. 通俗直白，直接给点位和执行动作。
+                    2. 通俗直白，若用户对比了两只股票，直接基于量化数据给出多空优劣排序与操作建议。
                     """
                     for m_name in models_to_try:
                         try:
@@ -525,9 +589,9 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         except Exception:
                             continue
 
-                # 若未配置 Key 或 API 限制，自动无缝启动内置规则保底
+                # 本地全自动保底
                 if not reply_text:
-                    reply_text = fallback_chat_answer(prompt_to_process, curr_ticker, data['cur_price'], data)
+                    reply_text = fallback_chat_answer(prompt_to_process, curr_ticker, data['cur_price'], data, compared_ticker_data)
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
