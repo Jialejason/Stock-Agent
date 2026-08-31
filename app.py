@@ -11,7 +11,7 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (多周期全维量化版)")
-st.caption("⚡ 5分钟全网共享缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击 ｜ 💬 智能FAQ与跨标的追问")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击 ｜ 💬 智能深度自主追问")
 
 # 1. 常用中英文名称到美股代码的别名映射字典
 TICKER_ALIASES = {
@@ -26,7 +26,7 @@ TICKER_ALIASES = {
     "AMD": "AMD", "超微": "AMD"
 }
 
-# 安全渲染 Markdown（彻底解决 $ 符号打碎加粗星号的 LaTeX 冲突）
+# 安全渲染 Markdown
 def safe_render_markdown(text):
     if not text:
         return
@@ -45,22 +45,22 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 1. 获取 API Key
+# 获取 API Key
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
-# 辅助函数：AI 操盘指令生成（带本地规则保底）
+# 辅助函数：AI 操盘指令生成（带深度规则兜底）
 def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
                     weekly_status, pit_status, hourly_status, hourly_suggested_entry, 
                     hourly_stop_loss, resistance_list, support_list, earnings_date_str, 
                     news_text, high_30d, ema20, api_key_val):
     
     prompt = f"""
-    你是一名顶级的资深美股操盘手兼新手导师。你的核心宗旨是【大道至简】。
-    请根据以下【周线-日线-1小时多周期共振】指标，为零基础小白写一份极其简明、直白的行动指南。
+    你是一名顶级的美股操盘手与量化投资导师。你的核心风格是【大道至简、精准果断、逻辑通透】。
+    请基于以下【周线-日线-1小时多周期共振】量化客观数据，为新手交易者推演行动指令：
 
     【股票标的】: {ticker_input}
     【最新现价】: ${cur_price:.2f}
@@ -68,25 +68,24 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     【市场情绪与利率】: {vix_status_str} ｜ {tnx_status_str}
     【🧭 周线大趋势】: {weekly_status}
     【🧱 日线形态雷达】: {pit_status}
-    【🎯 1小时盘中狙击】: {hourly_status} (盘中建议挂单参考: ${hourly_suggested_entry:.2f}, 1小时防守线: ${hourly_stop_loss:.2f})
+    【🎯 1小时盘中狙击】: {hourly_status} (盘中参考挂单: ${hourly_suggested_entry:.2f}, 1小时防守: ${hourly_stop_loss:.2f})
     【阶梯阻力与目标】: {'; '.join(resistance_list)}
     【阶梯防守支撑位】: {'; '.join(support_list)}
     【财报倒计时】: {earnings_date_str}
     【突发资讯】:
     {news_text if news_text else "暂无突发新闻"}
 
-    【排版与逻辑严格要求】：
-    1. 严禁出现断裂的星号或错位格式。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
-    2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】。
-    3. 直接给数字和执行动作，严禁模棱两可。
+    【输出格式与逻辑规范】：
+    1. 所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**，禁止散落星号。
+    2. 若定性为不可买，清晰写出必须满足的右侧突破条件。
 
-    请严格按以下 3 个极简板块输出：
-    1. 🚦 **多周期共振定性（红绿灯）**：用 2 句话讲清大趋势是顺风还是逆风？当前是该进攻、该埋伏、还是必须空仓管住手？
-    2. 💡 **小白实操动作（直接给数字）**：
-       - **买入决策**：清晰说明当前能否买入。若暂不可买，讲清必须满足什么突破条件才可在哪个精确价格挂单。
-       - **若触发买入后的止盈规划**：第一目标位与突破加速位分别看至哪里？
-       - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
-    3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
+    请严格按以下 3 个板块输出：
+    1. 🚦 **多周期共振定性（红绿灯）**：2句话讲清顺风还是逆风？攻还是守？
+    2. 💡 **小白实操动作（精准点位）**：
+       - **买入决策**：当前能否买入？若观望，需在什么价格突破并站稳后挂单？
+       - **止盈规划**：第一目标位与突破加速位分别看至哪里？
+       - **铁血止损**：跌破哪个精确价格必须离场？
+    3. ⚠️ **最核心的一个避险坑**：一句话点透最大风险。
     """
     
     if api_key_val:
@@ -101,30 +100,29 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
             except Exception:
                 continue
 
-    # 本地规则保底引擎
     is_bear = cur_price < ema20 or "逆风" in weekly_status
     decision = "🔴 **暂不可买，严格保持空仓！**" if is_bear else "🟢 **右侧多头共振，允许小仓位试错！**"
-    entry_note = f"必须等待放量突破短线阻力 **${high_30d:.2f}** 并站稳后，在 **${hourly_suggested_entry:.2f}** 附近小仓挂单。" if is_bear else f"可在回踩支撑 **${hourly_suggested_entry:.2f}** 附近分批介入。"
+    entry_note = f"必须等待日K线放量突破短线压制 **${high_30d:.2f}** 并在回踩不破时，于 **${hourly_suggested_entry:.2f}** 附近挂单。" if is_bear else f"可在回踩支撑 **${hourly_suggested_entry:.2f}** 附近分批介入。"
     
     return f"""
 1. 🚦 **多周期共振定性（红绿灯）**：
-当前周线与日线结构处于整固防守阶段，大趋势尚未形成合力，散户切忌逆势盲目抄底，严格遵守纪律。
+当前周线与日线均处于整固防守阶段，大趋势向下未形成多头合力，逆势抄底容易被套，严格以防守为主。
 
 2. 💡 **小白实操动作（直接给数字）**：
 - **买入决策**：{decision}
   - **入场条件**：{entry_note}
 - **若触发买入后的止盈规划**：
-  - **第一目标位**：触及 **${high_30d:.2f}** 附近必须先减仓 1/3 至 1/2 锁定利润。
-  - **突破加速位**：带量站稳阻力后，剩余底仓可看至上方更高平台。
-- **铁血止损底线**：一旦介入，跌破防守线 **${hourly_stop_loss:.2f}** 必须无条件止损离场！
+  - **第一目标位**：触及 **${high_30d:.2f}** 先减仓 1/3 锁定利润。
+  - **突破加速位**：站稳阻力后看至更高筹码密集平台。
+- **铁血止损底线**：一旦介入，跌破防守线 **${hourly_stop_loss:.2f}** 无条件止损！
 
-3. ⚠️ **最核心的一个避险坑**：均线未形成多头排列前切勿重仓赌反弹，谨防阴跌深踩。
+3. ⚠️ **最核心的一个避险坑**：均线空头排列时切忌补仓摊平成本，谨防阴跌寻底。
 """
 
-# 辅助函数：AI 问答保底推演引擎
-def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
-    res_top = data['resistance_list'][0] if data['resistance_list'] else "暂无关键阻力"
-    sup_top = data['support_list'][0] if data['support_list'] else f"近期防守位 ${data['hourly_stop_loss']:.2f}"
+# 辅助函数：AI 问答高度自主化保底推演引擎
+def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
+    res_top = data['resistance_list'][0] if data['resistance_list'] else "上方阻力平台"
+    sup_top = data['support_list'][0] if data['support_list'] else f"关键防守位 ${data['hourly_stop_loss']:.2f}"
     
     if compared_ticker_data:
         comp_sym = compared_ticker_data['symbol']
@@ -133,60 +131,64 @@ def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data, compared_tic
         comp_pit = compared_ticker_data['pit_status']
         
         return f"""
-针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）与 **{comp_sym}**（现价 **${comp_price:.2f}**）的量化横向对比：
+针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）与 **{comp_sym}**（现价 **${comp_price:.2f}**）的深度量化对比：
 
-1. **趋势强度对比**：
-   - **{curr_ticker}**：周线处于 `{data['weekly_status']}`，日线形态为 `{data['pit_status']}`。
-   - **{comp_sym}**：周线处于 `{comp_weekly}`，日线形态为 `{comp_pit}`。
-2. **多空优劣定性**：
-   - 若 **{comp_sym}** 处于均线上方顺风大牛势，其右侧确定性显著优于处于逆风磨底的 **{curr_ticker}**。
-3. **小白实操建议**：在大盘走弱环境下，优先配置周线顺风、放量突破的强势龙头（如 **{comp_sym}**），对处于均线下方的弱势股保持空仓观望。
+1. 🧭 **多周期趋势定性**：
+   - **{curr_ticker}**：周线 `{data['weekly_status']}`，日线形态 `{data['pit_status']}`。
+   - **{comp_sym}**：周线 `{comp_weekly}`，日线形态 `{comp_pit}`。
+2. ⚖️ **强弱排序与确定性**：
+   - 当前资金面更青睐右侧站稳均线的标的。若 **{comp_sym}** 结构更完整，确定性高于仍处均线下方的 **{curr_ticker}**。
+3. 🎯 **小白执行指令**：在大盘震荡期，严禁分仓去赌弱势股反弹，优先关注右侧放量企稳的龙头品种。
 """
 
-    if "止损" in prompt_text or "EMA20" in prompt_text:
+    if "企稳" in prompt_text or "什么价位" in prompt_text:
+        rebound_price = data['hourly_suggested_entry'] * 1.02
         return f"""
-针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）处于 EMA20 下方的反弹策略：
+关于 **{curr_ticker}** 判定【真正企稳】的量化点位与标准：
 
-1. **核心原则**：均线下方属于弱势区，反弹通常是【减仓避险】的机会，而非加仓点。
-2. **操作动作**：若股价反弹触及上方阻力位（如 **{res_top}**）且未能放量突破，建议果断减仓或逢高止损。
-3. **防守底线**：跌破近期关键支撑 **${data['hourly_stop_loss']:.2f}** 时，必须坚决执行止损。
+1. 🧱 **第一企稳信号（突破均线压制）**：
+   股价必须收复当前日线短线压制 **{res_top}**。只有日K线实体站稳该价格上方，才算止住短线单边阴跌。
+2. 🔒 **右侧企稳确认（回踩不破）**：
+   突破后需伴随量比 > **1.0 倍**，且回踩 **${cur_price:.2f}** ~ **${rebound_price:.2f}** 平台不破，此时构成安全的右侧进场信号。
+3. 🛑 **假企稳警示**：若盘中脉冲冲高但收盘仍被均线压制，属于诱多反抽，切勿急于追入。
 """
-    elif "大盘" in prompt_text or "独立走强" in prompt_text:
+    elif "买卖" in prompt_text or "建议" in prompt_text or "买" in prompt_text or "卖" in prompt_text:
         return f"""
-针对 **{curr_ticker}** 与大盘走势的关联判断：
+**{curr_ticker}**（现价 **${cur_price:.2f}**）当下最清晰的买卖执行方案：
 
-1. **大盘现状**：{data['market_status']}
-2. **个股独立性**：弱势大盘中只有极少数具备强催化剂的个股能短暂逆势。**{curr_ticker}** 当前量比为 **{data['vol_ratio']:.2f} 倍**，若无异常放量，大概率会跟随大盘承压调整。
-3. **策略建议**：大盘破位期间，宁可错过不可做错，严禁孤注一掷逆势重仓。
+- 🚦 **买入条件**：目前不满足右侧安全买点。必须等待放量突破 **{res_top}** 并站稳后挂单；
+- 🎯 **止盈目标**：若持有底仓，反弹触及 **{res_top}** 附近必须逢高减仓；
+- 🛡️ **止损防线**：下破防守位 **${data['hourly_stop_loss']:.2f}**（或 **{sup_top}**）无条件清仓观望。
 """
-    elif "仓位" in prompt_text or "资金" in prompt_text:
+    elif "止损" in prompt_text or "EMA20" in prompt_text:
         return f"""
-针对 **{curr_ticker}** 的小资金科学仓位配置：
+**{curr_ticker}** 处于 EMA20 下方的风控逻辑：
 
-1. **总仓位上限**：单只标的建议不超过总账户资产的 **15%~20%**。
-2. **阶梯式建仓**：
-   - 首次试错仓位：**5%**（右侧放量突破确认后介入）；
-   - 企稳加仓：**5%~10%**（站稳重要阻力上方回踩不破）；
-3. **单笔最大止损风险**：控制在总本金的 **1%~2%** 以内，跌破 **${data['hourly_stop_loss']:.2f}** 坚决离场。
+1. **破位性质**：均线下方属于空头占优区，反弹通常是【减仓防守】的机会。
+2. **操作动作**：若反弹至 **{res_top}** 遇阻，建议果断减仓；跌破 **${data['hourly_stop_loss']:.2f}** 坚决执行止损。
+"""
+    elif "大盘" in prompt_text or "独立" in prompt_text:
+        return f"""
+**{curr_ticker}** 与大盘走势的联动评估：
+
+1. **大盘环境**：{data['market_status']}
+2. **抗跌性分析**：**{curr_ticker}** 当前量比为 **{data['vol_ratio']:.2f} 倍**，没有明显增量资金入场托底前，单只股票很难持续逆势抗跌。
 """
     else:
         return f"""
-基于 **{curr_ticker}**（最新价 **${cur_price:.2f}**）的量化共振数据解答：
+针对关于 **{curr_ticker}** 的量化分析解答：
 
 - **中期趋势**：{data['weekly_status']}
-- **日线形态**：{data['pit_status']}
-- **关键阻力区间**：{res_top}
-- **重要防守支撑**：{sup_top}
-
-💡 **操盘建议**：当前市场环境下，严格按支撑阻力位执行分批挂单与止损纪律，切勿盲目追涨杀跌。
+- **短线压制**：{res_top}
+- **核心支撑**：{sup_top}
+- **战术指引**：在周线与日线未形成多头共振前，保持耐心，宁可等右侧买点，不盲目左侧猜底。
 """
 
-# 2. 核心量化算法（带 5 分钟共享缓存与严格动态均线归类）
+# 2. 核心量化算法（带 5 分钟共享缓存）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
     
-    # 宏观大盘监控
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", progress=False)
     
@@ -220,7 +222,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 日线数据
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="1y", interval="1d", progress=False)
     
@@ -261,11 +262,9 @@ def fetch_and_analyze(ticker_input, api_key_val):
     high_52w = high_d.max()
     low_30d = low_d.iloc[-min(30, total_days):].min()
     
-    # 严格动态判定阻力与支撑（高于现价归入阻力，低于现价归入支撑）
     resistance_list = []
     support_list = []
 
-    # 1. 均线归类
     if ema5 > cur_price: resistance_list.append(f"短线压制 (EMA5): ${ema5:.2f}")
     else: support_list.append(f"超短支撑 (EMA5): ${ema5:.2f}")
 
@@ -279,7 +278,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
         if ma60 > cur_price: resistance_list.append(f"中期生命线压制 (MA60): ${ma60:.2f}")
         else: support_list.append(f"中期生命线支撑 (MA60): ${ma60:.2f}")
 
-    # 2. 结构高低点归类
     if cur_price >= high_30d * 0.99:
         if high_120d > cur_price * 1.01:
             resistance_list.append(f"🔥 突破30日高点！下一阻力锁定【半年高点】: ${high_120d:.2f}")
@@ -307,7 +305,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # 周线数据
     weekly_status = "周线中性"
     try:
         df_weekly = yf.download(ticker_input, period="2y", interval="1wk", progress=False)
@@ -327,7 +324,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 1小时盘中数据
     hourly_status = "盘中中性"
     hourly_suggested_entry = cur_price
     hourly_stop_loss = cur_price * 0.985
@@ -356,7 +352,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 财报与新闻
     earnings_date_str = "暂无近期数据"
     days_to_earnings = 999
     try:
@@ -379,7 +374,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # FAQ 列表
     suggested_faqs = []
     if cur_price >= high_30d * 0.985:
         suggested_faqs.append("🚀 创阶段新高，如何设置移动止盈不卖飞？")
@@ -399,13 +393,11 @@ def fetch_and_analyze(ticker_input, api_key_val):
     suggested_faqs.append(f"💰 我资金量较小，针对 {ticker_input} 怎么执行科学仓位管理？")
     top_faqs = suggested_faqs[:3]
 
-    # 双时区
     now_utc = datetime.now(timezone.utc)
     local_time_str = (now_utc + timedelta(hours=8)).strftime("%H:%M:%S")
     et_time_str = (now_utc - timedelta(hours=4)).strftime("%H:%M:%S")
     cache_display_time = f"{local_time_str} 本地 ｜ {et_time_str} 美东"
 
-    # AI 生成
     ai_analysis_text = get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, 
                                        tnx_status_str, weekly_status, pit_status, hourly_status, 
                                        hourly_suggested_entry, hourly_stop_loss, resistance_list, 
@@ -474,14 +466,12 @@ if "current_data" in st.session_state and st.session_state.current_data:
     
     st.caption(f"⚡ 数据已智能缓存（刷新时间: {data['cache_display_time']} ｜ 5分钟内全员秒开无消耗）")
     
-    # 宏观大盘风控
     if "🔴" in data['market_status']: st.error(f"**大盘风控:** {data['market_status']}")
     elif "⚠️" in data['market_status']: st.warning(f"**大盘风控:** {data['market_status']}")
     else: st.success(f"**大盘风控:** {data['market_status']}")
     
     st.info(f"🌐 **宏观情绪与利率：** {data['vix_status_str']} ｜ 🏛️ {data['tnx_status_str']}")
     
-    # 多周期共振三维雷达
     st.subheader("🚦 多周期共振雷达")
     st.write(f"- 🧭 **周线大趋势 (中期定性):** {data['weekly_status']}")
     st.write(f"- 🧱 **日线形态 (黄金坑/筑底):** {data['pit_status']}")
@@ -492,11 +482,9 @@ if "current_data" in st.session_state and st.session_state.current_data:
     vol_status = "🔥 放量" if data['vol_ratio'] > 1.3 else "🧊 缩量" if data['vol_ratio'] < 0.7 else "⚖️ 平量"
     col_m2.metric(label="5日量比", value=f"{data['vol_ratio']:.2f} 倍", delta=vol_status)
 
-    # Gemini AI 操盘手行动指令
     st.subheader("🤖 Gemini 操盘手行动指令 (大道至简)")
     safe_render_markdown(data['ai_analysis_text'])
 
-    # 阶梯支撑与动态阻力看板
     st.subheader("🛡️ 阶梯支撑与动态阻力看板")
     col1, col2 = st.columns(2)
     with col1:
@@ -504,17 +492,16 @@ if "current_data" in st.session_state and st.session_state.current_data:
     with col2:
         st.warning("**【动态阻力与目标】**\n\n" + "\n\n".join(data['resistance_list']))
     
-    # 动能与量价特征
     st.subheader("⚡ 动能与量价特征")
     macd_str = "🟢 多头金叉（动能充沛）" if data['macd_diff_d'] > 0 else "🔴 动能减弱/死叉休整"
     st.write(f"- **MACD 状态:** `{macd_str}` (柱值: {data['macd_diff_d']:.2f})")
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（全自动多标的保底）
+    # 5. 专属 AI 操盘助理（高度聪明自主化推演）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
-    st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持输入中文名/代码（如 对比tesla / 对比NVDA）进行横向对比。")
+    st.caption(f"💡 AI 已深度挂载 {curr_ticker} 的全部量化数据，支持深度自由追问、实战推演或跨标的横向对比。")
 
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
@@ -531,7 +518,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 对比TSLA/苹果）...")
+    user_input = st.chat_input(f"问问关于 {curr_ticker}（如企稳价位、买卖点）或对比其他股票...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -540,13 +527,12 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("AI 操盘手正在推演解答..."):
+            with st.spinner("AI 操盘手正在针对具体问题深度推演解答..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 compared_ticker_data = None
                 extra_data_text = ""
                 
-                # 获取被对比标的的最新数据
                 for sym in extracted_symbols:
                     if sym != curr_ticker:
                         try:
@@ -561,23 +547,30 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         except Exception:
                             pass
 
-                # 尝试调用多通道 Gemini
+                # 优先调用真 AI 进行针对性深度推演
                 if api_key:
                     genai.configure(api_key=api_key)
                     models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
                     
                     context_prompt = f"""
-                    你是一名顶级的资深美股操盘手兼新手导师，秉承【大道至简】的教学风格。
-                    当前标的: {curr_ticker}，现价: ${data['cur_price']:.2f}。
-                    大盘状态: {data['market_status']}，周线趋势: {data['weekly_status']}，日线形态: {data['pit_status']}，1小时狙击: {data['hourly_status']}。
-                    阻力位: {'; '.join(data['resistance_list'])}，支撑位: {'; '.join(data['support_list'])}。
+                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心优势是【能够针对用户的具体问题进行深度、精准、量身定制的推演】。
+                    
+                    【当前标的】: {curr_ticker}，现价: ${data['cur_price']:.2f}
+                    【宏观大盘】: {data['market_status']}
+                    【周线大趋势】: {data['weekly_status']}
+                    【日线形态】: {data['pit_status']}
+                    【1小时盘中】: {data['hourly_status']} (参考买点: ${data['hourly_suggested_entry']:.2f}, 1小时防守: ${data['hourly_stop_loss']:.2f})
+                    【动态阻力与目标】: {'; '.join(data['resistance_list'])}
+                    【阶梯防守支撑】: {'; '.join(data['support_list'])}
+                    【ATR日均波幅】: ${data['atr_d']:.2f} ｜ 量比: {data['vol_ratio']:.2f}倍
                     {extra_data_text}
 
-                    用户提问: "{prompt_to_process}"
+                    用户的具体提问是: "{prompt_to_process}"
 
-                    要求：
-                    1. 价格严格规范加粗（如 **$18.04**）。
-                    2. 通俗直白，若用户对比了两只股票，直接基于量化数据给出多空优劣排序与操作建议。
+                    【严格作答要求】：
+                    1. 严禁使用笼统模版！必须正面、深度、针对性地回答用户的具体问题（例如用户问“什么价位才算企稳”，就必须结合上方阻力位计算出具体的企稳突破价格与确认条件）。
+                    2. 所有价格数字必须紧跟美元符号规范加粗（例如 **$18.40**）。
+                    3. 直接给点位、逻辑与执行动作，语言精炼、直白、专业。
                     """
                     for m_name in models_to_try:
                         try:
@@ -587,11 +580,12 @@ if "current_data" in st.session_state and st.session_state.current_data:
                                 reply_text = chat_resp.text
                                 break
                         except Exception:
+                            time.sleep(0.5)
                             continue
 
-                # 本地全自动保底
+                # 本地多意图智能保底（彻底消除内容重复）
                 if not reply_text:
-                    reply_text = fallback_chat_answer(prompt_to_process, curr_ticker, data['cur_price'], data, compared_ticker_data)
+                    reply_text = fallback_smart_chat(prompt_to_process, curr_ticker, data['cur_price'], data, compared_ticker_data)
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
