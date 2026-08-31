@@ -69,7 +69,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
             except Exception:
                 continue
 
-    # 本地规则保底引擎（API受限时自动接管，确保 100% 稳定输出）
+    # 本地规则保底引擎
     is_bear = cur_price < ema20 or "逆风" in weekly_status
     decision = "🔴 **暂不可买，严格保持空仓！**" if is_bear else "🟢 **右侧多头共振，允许小仓位试错！**"
     entry_note = f"必须等待放量突破短线阻力 **${high_30d:.2f}** 并站稳后，在 **${hourly_suggested_entry:.2f}** 附近小仓挂单。" if is_bear else f"可在回踩支撑 **${hourly_suggested_entry:.2f}** 附近分批介入。"
@@ -87,6 +87,49 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 - **铁血止损底线**：一旦介入，跌破防守线 **${hourly_stop_loss:.2f}** 必须无条件止损离场！
 
 3. ⚠️ **最核心的一个避险坑**：均线未形成多头排列前切勿重仓赌反弹，谨防阴跌深踩。
+"""
+
+# 辅助函数：AI 问答保底推演引擎
+def fallback_chat_answer(prompt_text, curr_ticker, cur_price, data):
+    res_top = data['resistance_list'][0] if data['resistance_list'] else ""
+    sup_top = data['support_list'][0] if data['support_list'] else ""
+    
+    if "止损" in prompt_text or "EMA20" in prompt_text:
+        return f"""
+针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）处于 EMA20 下方的反弹策略：
+
+1. **核心原则**：均线下方属于弱势区，反弹通常是【减仓避险】的机会，而非加仓点。
+2. **操作动作**：若股价反弹触及上方阻力位（如 **{res_top}**）且未能放量突破，建议果断减仓或逢高止损。
+3. **防守底线**：跌破近期关键支撑 **${data['hourly_stop_loss']:.2f}** 时，必须坚决执行止损。
+"""
+    elif "大盘" in prompt_text or "独立走强" in prompt_text:
+        return f"""
+针对 **{curr_ticker}** 与大盘走势的关联判断：
+
+1. **大盘现状**：{data['market_status']}
+2. **个股独立性**：弱势大盘中只有极少数具备强催化剂的个股能短暂逆势。**{curr_ticker}** 当前量比为 **{data['vol_ratio']:.2f} 倍**，若无异常放量，大概率会跟随大盘承压调整。
+3. **策略建议**：大盘破位期间，宁可错过不可做错，严禁孤注一掷逆势重仓。
+"""
+    elif "仓位" in prompt_text or "资金" in prompt_text:
+        return f"""
+针对 **{curr_ticker}** 的小资金科学仓位配置：
+
+1. **总仓位上限**：单只标的建议不超过总账户资产的 **15%~20%**。
+2. **阶梯式建仓**：
+   - 首次试错仓位：**5%**（右侧放量突破确认后介入）；
+   - 企稳加仓：**5%~10%**（站稳重要阻力上方回踩不破）；
+3. **单笔最大止损风险**：控制在总本金的 **1%~2%** 以内，跌破 **${data['hourly_stop_loss']:.2f}** 坚决离场。
+"""
+    else:
+        return f"""
+基于 **{curr_ticker}**（最新价 **${cur_price:.2f}**）的量化共振数据解答：
+
+- **中期趋势**：{data['weekly_status']}
+- **日线形态**：{data['pit_status']}
+- **关键阻力区间**：{res_top}
+- **重要防守支撑**：{sup_top}
+
+💡 **操盘建议**：当前市场环境下，严格按支撑阻力位执行分批挂单与止损纪律，切勿盲目追涨杀跌。
 """
 
 # 2. 核心量化算法（带 5 分钟共享缓存）
@@ -404,7 +447,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理
+    # 5. 专属 AI 操盘助理（全自动保底）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持一键点击热门实战疑问，或输入其他股票（如 TSLA/AAPL）进行横向对比。")
@@ -432,59 +475,52 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message("user"):
             st.markdown(prompt_to_process)
 
-        if not api_key:
-            with st.chat_message("assistant"):
-                st.warning("请先配置 Gemini API Key 才能向 AI 助理提问。")
-        else:
-            with st.chat_message("assistant"):
-                with st.spinner("AI 操盘手正在极速调度共享数据并推演解答..."):
+        with st.chat_message("assistant"):
+            with st.spinner("AI 操盘手正在推演解答..."):
+                reply_text = ""
+                
+                # 尝试调用多通道 Gemini
+                if api_key:
+                    genai.configure(api_key=api_key)
+                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+                    
                     words = re.findall(r'\b[A-Z]{2,5}\b', prompt_to_process.upper())
                     extra_data_text = ""
-                    
                     for sym in set(words):
                         if sym != curr_ticker:
                             try:
                                 other_data, _ = fetch_and_analyze(sym, api_key)
                                 if other_data:
-                                    extra_data_text += f"""
-                                    【提及标的 {sym} 最新量化数据】:
-                                    现价: ${other_data['cur_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
-                                    关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
-                                    """
+                                    extra_data_text += f"\n【{sym} 数据】: 现价: ${other_data['cur_price']:.2f}, 周线: {other_data['weekly_status']}, 日线: {other_data['pit_status']}"
                             except Exception:
                                 pass
 
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼新手导师，秉承【大道至简】的教学风格。
-                    当前主标的为: {curr_ticker}，现价: ${data['cur_price']:.2f}。
+                    当前标的: {curr_ticker}，现价: ${data['cur_price']:.2f}。
                     大盘状态: {data['market_status']}，周线趋势: {data['weekly_status']}，日线形态: {data['pit_status']}，1小时狙击: {data['hourly_status']}。
-                    主标的阻力位: {'; '.join(data['resistance_list'])}，支撑位: {'; '.join(data['support_list'])}。
-
+                    阻力位: {'; '.join(data['resistance_list'])}，支撑位: {'; '.join(data['support_list'])}。
                     {extra_data_text}
 
-                    用户的提问是: "{prompt_to_process}"
+                    用户提问: "{prompt_to_process}"
 
-                    请严格遵守以下要求作答：
-                    1. 严禁出现断裂的星号或排版错位，所有关键价格统一规范加粗（如 **$18.04**）。
-                    2. 用通俗易懂的大白话回答，不要堆砌生涩的学术术语。
-                    3. 如果用户对比了两只股票，请结合上述客观数据直接给出优劣排序与清晰的买卖建议。
-                    4. 直接给出数字和具体执行动作，严禁模棱两可。
+                    要求：
+                    1. 价格严格规范加粗（如 **$18.04**）。
+                    2. 通俗直白，直接给点位和执行动作。
                     """
-                    genai.configure(api_key=api_key)
-                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-                    reply = ""
                     for m_name in models_to_try:
                         try:
                             chat_model = genai.GenerativeModel(m_name)
                             chat_resp = chat_model.generate_content(context_prompt)
                             if chat_resp and chat_resp.text:
-                                reply = chat_resp.text
+                                reply_text = chat_resp.text
                                 break
                         except Exception:
                             continue
-                    
-                    if reply:
-                        st.markdown(reply)
-                        st.session_state.chat_history.append({"role": "assistant", "content": reply})
-                    else:
-                        st.error("AI 助理暂时繁忙，请稍候再试。")
+
+                # 若未配置 Key 或 API 限制，自动无缝启动内置规则保底
+                if not reply_text:
+                    reply_text = fallback_chat_answer(prompt_to_process, curr_ticker, data['cur_price'], data)
+
+                st.markdown(reply_text)
+                st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
