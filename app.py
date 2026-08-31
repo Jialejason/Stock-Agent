@@ -4,8 +4,8 @@ import pandas as pd
 from ta.trend import EMAIndicator, SMAIndicator
 from ta.momentum import RSIIndicator
 
-st.set_page_config(page_title="AI 投资点位助手", layout="centered")
-st.title("📈 AI 投资诊断助手")
+st.set_page_config(page_title="投资小助手", layout="centered")
+st.title("📈 投资小助手")
 st.caption("输入美股代码，秒级计算均线与支撑阻力")
 
 ticker = st.text_input("美股代码", value="NVDA").strip().upper()
