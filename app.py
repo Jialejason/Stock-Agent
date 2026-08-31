@@ -12,7 +12,7 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (全维实战闭环版)")
-st.caption("⚡ 5分钟全网共享缓存 ｜ 📰 实时新闻舆情 ｜ 🌐 宏观情绪雷达 ｜ ⚖️ 盈亏比自动核验 ｜ 🧱 全景筹码峰 ｜ 🎯 阶梯止盈")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 📰 实时新闻舆情 ｜ 🌐 宏观情绪雷达 ｜ ⚖️ 盈亏比通俗解读 ｜ 🧱 全景筹码峰 ｜ 🎯 阶梯止盈")
 
 # 1. 别名映射与 Markdown 安全渲染
 TICKER_ALIASES = {
@@ -90,7 +90,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
         news_digest = "暂无重大突发突变资讯，当前以纯技术与资金面主导。"
 
     prompt = f"""
-    你是一名顶级实战派美股操盘手兼新手导师。核心宗旨是【大道至简、双向闭环、消息与技术共振、严控风险】。
+    你是一名顶级实战派美股操盘手兼新手导师。核心宗旨是【大道至简、双向闭环、大白话教学、严控盈亏比】。
     请基于以下【技术指标 + 全景筹码 + 宏观情绪 + 实时新闻舆情】，为小白推演交易行动手册：
 
     【股票标的】: {ticker_input} ｜ 最新价: ${cur_price:.2f}
@@ -109,7 +109,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 
     【严格输出要求】：
     1. 所有价格数字统一规范加粗（如 **$18.44**），严禁散落星号。
-    2. 必须结合上述新闻资讯与宏观情绪，点评消息面对该股是正向催化还是利空施压。
+    2. 必须用大白话讲清楚盈亏比与新闻催化，严禁使用晦涩难懂的专业术语。
 
     请按以下 4 个板块输出：
     1. 🚦 **多周期共振、宏观情绪与消息面定性（红绿灯）**：2-3句话讲清大趋势、日内VWAP多空态势以及新闻催化剂是利多还是利空。
@@ -121,7 +121,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
        - **第一止盈目标（减仓 1/3~1/2）**：反弹触及哪个近端筹码阻力主动锁定利润？
        - **突破顺势推仓点**：带量站稳哪个价格后允许顺势追击看高一线？
        - **大波段终极清仓位**：冲入哪个历史重度套牢峰/52周高点必须果断清仓离场？
-    4. ⚖️ **交易质量与盈亏比核验**：一句话点评当前价格的盈亏比与消息面配合度是否值得动手。
+    4. ⚖️ **交易质量与盈亏比核验**：直接给结论（划算/不划算），用生活化语言讲透为什么。
     """
     
     if api_key_val:
@@ -142,11 +142,11 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     res_clear = chip_resistances[-1] if len(chip_resistances) > 2 else min(high_52w, res2 * 1.1)
     sup_dip = chip_supports[0] if chip_supports else hourly_suggested_entry
 
-    rr_eval = "🟢 盈亏比优良（≥ 2.0），具备博弈价值" if rr_ratio >= 2.0 else "🔴 盈亏比较差（< 2.0），不建议盲目介入"
+    rr_eval = "🟢 盈亏比优良（≥ 2.0），值得以小博大" if rr_ratio >= 2.0 else "🔴 盈亏比较差（< 2.0），不建议盲目介入"
 
     return f"""
 1. 🚦 **多周期共振、宏观情绪与消息面定性（红绿灯）**：
-当前宏观情绪处于【{macro_sentiment_tag}】，个股在日内成本线 (VWAP: **${vwap_price:.2f}**) 附近运行。近期新闻以行业常规动态为主，整体以技术面整固防守为核心导向。
+当前宏观情绪处于【{macro_sentiment_tag}】，个股在日内成本线 (VWAP: **${vwap_price:.2f}**) 附近运行。近期无突发恶性利空，整体以技术面整固防守为核心导向。
 
 2. 💡 **跌势：小白抄底与分批吸筹指南（跌了怎么买）**：
 - **黄金坑左侧试错位（10%~20% 头仓）**：若回调至支撑带 **${sup_dip:.2f}** 附近且缩量，可轻仓试错。
@@ -162,7 +162,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
-# AI 深度问答保底
+# AI 深度问答保底 (大白话升级版)
 def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
     chips = data['chip_resistances']
     res1 = chips[0] if chips else cur_price * 1.05
@@ -170,6 +170,8 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
     res_top = chips[-1] if len(chips) > 2 else res2 * 1.1
     sup_dip = data['chip_supports'][0] if data['chip_supports'] else data['hourly_suggested_entry']
     vwap_p = data['vwap_price']
+    stop_p = data['hourly_stop_loss']
+    rr = data['rr_ratio']
     
     if compared_ticker_data:
         comp_sym = compared_ticker_data['symbol']
@@ -183,49 +185,59 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 2. **买卖建议**：优先选择右侧站稳均线标的；处于底部的标的严格按支撑位分批低吸，不可追高。
 """
 
-    if "新闻" in prompt_text or "消息" in prompt_text or "催化" in prompt_text:
+    if "盈亏比" in prompt_text or "值得买" in prompt_text or "风险" in prompt_text:
+        up_pct = ((res1 - cur_price) / cur_price) * 100
+        down_pct = ((cur_price - stop_p) / cur_price) * 100
+        
+        if rr >= 2.0:
+            verdict = f"🟢 **结论：非常划算（值得博弈）！**\n> 相当于冒着亏 **{down_pct:.1f}%** 的极小代价，去博取 **+{up_pct:.1f}%** 的反弹利润，性价比很高，适合轻仓建仓试错。"
+        else:
+            verdict = f"🔴 **结论：不划算（风险大于收益，严禁追高）！**\n> 相当于冒着可能亏 **-{down_pct:.1f}%** 的风险，只能赚到 **+{up_pct:.1f}%** 的利润（盈亏比仅 **{rr:.2f}:1**，低于2:1的黄金标准）。**新手千万别在现价追高**，耐心等回踩支撑位 **${sup_dip:.2f}** 附近再考虑！"
+            
         return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的近期消息面研判：
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易盈亏比大白话核验：
 
-1. **宏观与行业情绪**：当前处于【{data['macro_sentiment_tag']}】环境。
-2. **消息应对准则**：
-   - 若出现突发利好，需观察日K线是否放量站稳 **${res1:.2f}**，谨防利好高开低走（假突破）；
-   - 若出现突发利空，只要未跌破铁血止损位 **${data['hourly_stop_loss']:.2f}**，切忌恐慌杀在日内最低点。
+- 🎯 **上行第1目标空间**：**${res1:.2f}** (+{up_pct:.1f}%)
+- 🛑 **下行止损防守底线**：**${stop_p:.2f}** (-{down_pct:.1f}%)
+- ⚖️ **动态盈亏比**：**{rr:.2f} : 1**
+
+{verdict}
 """
-    elif "盈亏比" in prompt_text or "值得买" in prompt_text:
+    elif "新闻" in prompt_text or "消息" in prompt_text or "催化" in prompt_text:
         return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易盈亏比核验：
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的消息面大白话解读：
 
-- 上行第1目标空间：**${res1:.2f}** (+{((res1-cur_price)/cur_price)*100:.1f}%)
-- 下行止损防守底线：**${data['hourly_stop_loss']:.2f}** (-{((cur_price-data['hourly_stop_loss'])/cur_price)*100:.1f}%)
-- 动态盈亏比：**{data['rr_ratio']:.2f} : 1**
+1. **大环境情绪**：当前处于【{data['macro_sentiment_tag']}】环境。
+2. **实操怎么做**：
+   - 📢 **出突发利好**：千万别一开盘就冲动满仓追，一定要看股价能不能稳稳站上 **${res1:.2f}**，防止机构借利好出货（假突破）；
+   - 🚨 **出突发利空**：只要没有跌破铁血止损线 **${stop_p:.2f}**，就不用自己吓自己盲目割肉在最低点。
 """
     elif "抄底" in prompt_text or "吸筹" in prompt_text:
         return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）下跌时的科学抄底与吸筹方案：
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）下跌时的科学抄底方案：
 
-1. 💎 **第一阶段（10%~20% 仓位）**：挂单于 **${sup_dip:.2f}** 支撑带附近。
-2. 🧱 **第二阶段（30% 仓位）**：放量站稳日内成本线 VWAP **${vwap_p:.2f}** 后确认加仓。
-3. 🛑 **禁买熔断线**：跌破 **${data['hourly_stop_loss']:.2f}** 坚决止损。
+1. 💎 **第一阶段（10%~20% 试错仓）**：挂单于 **${sup_dip:.2f}** 支撑带附近。
+2. 🧱 **第二阶段（30% 确认加仓）**：等股价放量站上日内成本线 VWAP **${vwap_p:.2f}** 后再加仓。
+3. 🛑 **禁买熔断线**：跌破 **${stop_p:.2f}** 坚决止损，绝不逆势扛单。
 """
     elif "止盈" in prompt_text or "清仓" in prompt_text:
         return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）上涨时的阶梯止盈与清仓规划：
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）上涨时的止盈/清仓规划：
 
-1. 🎯 **第1减仓位（落袋 1/3）**：**${res1:.2f}**；
+1. 🎯 **第1减仓位（锁定 1/3~1/2 利润）**：**${res1:.2f}**；
 2. 🚀 **突破加速目标**：**${res2:.2f}**；
-3. 🚨 **终极清仓位**：**${res_top:.2f}**。
+3. 🚨 **终极清仓位**：**${res_top:.2f}**（落袋为安，不吃鱼尾行情）。
 """
     else:
         return f"""
 基于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易推演：
 
-- **吸筹支撑**：**${sup_dip:.2f}** ｜ **防守底线**：**${data['hourly_stop_loss']:.2f}**
+- **吸筹支撑**：**${sup_dip:.2f}** ｜ **防守底线**：**${stop_p:.2f}**
 - **阶梯阻力**：**${res1:.2f}** ➔ **${res2:.2f}** ➔ **${res_top:.2f}**
 - **日内成本**：**${vwap_p:.2f}**
 """
 
-# 2. 核心量化算法（集成新闻抓取与全景情绪监控）
+# 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
@@ -495,8 +507,8 @@ def fetch_and_analyze(ticker_input, api_key_val):
         pass
 
     top_faqs = [
-        f"📰 {ticker_input} 近期新闻消息面是利多还是利空？对股价有何具体影响？",
         f"⚖️ 当前介入 {ticker_input} 的盈亏比是多少？值得冒这个风险吗？",
+        f"📰 {ticker_input} 近期新闻消息面是利多还是利空？对股价有何具体影响？",
         f"💎 若 {ticker_input} 继续下探，在哪个黄金坑支撑位分批抄底吸筹最安全？"
     ]
 
@@ -645,7 +657,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"问问关于 {curr_ticker}（如新闻利多利空、盈亏比、黄金坑吸筹位）或对比其他股票...")
+    user_input = st.chat_input(f"问问关于 {curr_ticker}（如盈亏比是否划算、新闻利多利空、吸筹位）或对比其他股票...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -681,7 +693,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
                     
                     context_prompt = f"""
-                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心优势是【能够结合实时新闻舆情、宏观情绪、盈亏比评级、年线MA250、黄金坑吸筹位、全景阻力与VWAP给出精确执行策略】。
+                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心优势是【能够结合实时新闻舆情、宏观情绪、盈亏比评级、年线MA250、黄金坑吸筹位、全景阻力与VWAP给出精确执行策略，并用最通俗易懂的大白话直接给结论】。
                     
                     【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
                     【宏观大盘】: {data['market_status']} ｜ 宏观情绪: {data['macro_sentiment_tag']}
@@ -701,7 +713,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     用户的具体提问是: "{prompt_to_process}"
 
                     【严格作答要求】：
-                    1. 严禁使用笼统模版！直接针对用户的问题作答（涉及新闻事件结合市场情绪透彻分析；涉及盈亏比评级与具体点位直接给出）。
+                    1. 严禁使用笼统模版！直接针对用户的问题作答。若涉及盈亏比/是否值得买，计算后必须直接给出通俗大白话结论（如：“结论：不划算/划算，相当于冒着亏 X 块的风险去博 Y 块的利润...”）。
                     2. 所有价格数字必须紧跟美元符号规范加粗（例如 **$18.40**）。
                     3. 直接给点位、比例与执行动作，语言精炼直白。
                     """
