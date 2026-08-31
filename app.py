@@ -3,23 +3,24 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 import time
+import re
 from ta.trend import EMAIndicator, SMAIndicator, MACD
 from ta.momentum import RSIIndicator
 from ta.volatility import AverageTrueRange
 import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
-st.title("📈 投资小助手 Pro (大道至简·多周期量化版)")
-st.caption("⚡ 5分钟智能缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击点位 ｜ 💬 专属AI追问")
+st.title("📈 投资小助手 Pro (多周期全维量化版)")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 🧭 周线趋势 ｜ 🧱 日线形态 ｜ 🎯 1小时狙击 ｜ 🤖 跨标的智能追问")
 
-# 1. 获取 API Key
+# 1. 获取 API Key (优先读取 Streamlit Secrets)
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
-# 2. 核心量化算法（多周期共振 + 5分钟智能共享缓存）
+# 2. 核心量化算法（多周期共振 + 5分钟智能全局共享缓存）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     # 宏观大盘监控 (SPY / QQQ / VIX / TNX)
@@ -55,7 +56,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # A. 获取日线数据 (Daily)
+    # A. 获取日线数据 (Daily - 形态与阶梯阻力支撑)
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="1y", interval="1d", progress=False)
     
@@ -89,7 +90,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     avg_vol_5d = vol_d.iloc[-6:-1].mean() if total_days >= 6 else vol_d.mean()
     vol_ratio = (cur_vol / avg_vol_5d) if avg_vol_5d > 0 else 1.0
 
-    # 阶梯阻力与支撑
+    # 阶梯式动态阻力与多维支撑
     high_30d = high_d.iloc[-min(30, total_days):].max()
     high_120d = high_d.iloc[-min(120, total_days):].max() if total_days >= 30 else high_30d
     high_52w = high_d.max()
@@ -118,6 +119,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     support_list.append(f"中期生命线 (MA60): {ma60_str}")
     support_list.append(f"30日筑底强支撑: ${low_30d:.2f}")
 
+    # 形态雷达判定
     pit_status = "正常走势"
     if rsi_d < 38 and cur_price <= low_30d * 1.03:
         pit_status = "💎 极端超卖黄金坑：指标极度冰点超跌，存在高盈亏比反弹反转机会！"
@@ -126,7 +128,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # B. 获取周线数据 (Weekly)
+    # B. 获取周线数据 (Weekly - 大周期大方向)
     weekly_status = "周线中性"
     try:
         df_weekly = yf.download(ticker_input, period="2y", interval="1wk", progress=False)
@@ -146,7 +148,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # C. 获取 1 小时盘中数据 (1-Hour)
+    # C. 获取 1 小时盘中数据 (1-Hour - 盘中狙击买点)
     hourly_status = "盘中中性"
     hourly_suggested_entry = cur_price
     hourly_stop_loss = cur_price * 0.985
@@ -203,7 +205,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
         model = genai.GenerativeModel('gemini-3.6-flash')
         
         prompt = f"""
-        你是一名顶级的资深美股操盘手兼新手导师。你的核心教学宗旨是【大道至简】。
+        你是一名顶级的资深美股操盘手兼新手导师。你的教学宗旨是【大道至简】。
         请根据以下【周线-日线-1小时多周期共振】指标，用极其简明、直白的语言，为零基础小白写一份毫无废话的行动指南。
 
         【股票标的】: {ticker_input}
@@ -244,6 +246,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
                     ai_analysis_text = f"诊断暂时中断: {err_msg}"
                     break
 
+    # 打包所有指标
     result_bundle = {
         "market_status": market_status,
         "vix_status_str": vix_status_str,
@@ -296,7 +299,6 @@ if st.button("开始多周期全维共振诊断", type="primary", use_container_
         else:
             st.session_state.current_data = data
             st.session_state.current_ticker = ticker_input
-            # 切换股票时清空上一次的追问历史
             st.session_state.chat_history = []
 
 # 渲染分析面板
@@ -346,10 +348,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（追问解惑）
+    # 5. 专属 AI 操盘助理（支持跨标的秒调共享缓存）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
-    st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，你可以直接问仓位配置、挂单技巧或突发情况。")
+    st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，直接支持跨标的对比（例如输入 TSLA / AAPL），系统将秒调共享缓存。")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -359,8 +361,8 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 接收用户追问
-    if user_question := st.chat_input(f"问问关于 {curr_ticker} 的任何疑问（如：分批挂单/跌破怎么做）..."):
+    # 接收用户追问（支持自动提取其他股票代码并秒读共享缓存池）
+    if user_question := st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 TSLA/AAPL）..."):
         st.session_state.chat_history.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
@@ -370,18 +372,36 @@ if "current_data" in st.session_state and st.session_state.current_data:
                 st.warning("请先配置 Gemini API Key 才能向 AI 助理提问。")
         else:
             with st.chat_message("assistant"):
-                with st.spinner("AI 操盘手正在针对当前个股行情为您推演解答..."):
+                with st.spinner("AI 操盘手正在极速调度共享数据并推演解答..."):
+                    # 自动提取提问中的其他股票代码 (2-5位大写字母)
+                    words = re.findall(r'\b[A-Z]{2,5}\b', user_question.upper())
+                    extra_data_text = ""
+                    
+                    # 从全局共享缓存秒调其他标的数据
+                    for sym in set(words):
+                        if sym != curr_ticker:
+                            other_data, _ = fetch_and_analyze(sym, api_key)
+                            if other_data:
+                                extra_data_text += f"""
+                                【提及标的 {sym} 最新量化数据】:
+                                现价: ${other_data['cur_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
+                                关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
+                                """
+
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼新手导师，秉承【大道至简】的教学风格。
-                    当前分析标的为: {curr_ticker}，现价: ${data['cur_price']:.2f}。
+                    当前主标的为: {curr_ticker}，现价: ${data['cur_price']:.2f}。
                     大盘状态: {data['market_status']}，周线趋势: {data['weekly_status']}，日线形态: {data['pit_status']}，1小时狙击: {data['hourly_status']}。
-                    阻力位: {'; '.join(data['resistance_list'])}，支撑位: {'; '.join(data['support_list'])}。
+                    主标的阻力位: {'; '.join(data['resistance_list'])}，支撑位: {'; '.join(data['support_list'])}。
+
+                    {extra_data_text}
 
                     用户的追问是: "{user_question}"
 
                     请严格遵守以下要求作答：
                     1. 用通俗易懂的大白话回答，不要堆砌生涩的学术术语。
-                    2. 结合上述给出的客观价格与支撑阻力，直接给出明确、可执行的建议（直接给数字和动作），严禁模棱两可。
+                    2. 如果用户对比了两只股票，请结合上述客观数据直接给出优劣排序与清晰的买卖建议。
+                    3. 直接给出数字和执行动作，严禁模棱两可。
                     """
                     try:
                         genai.configure(api_key=api_key)
