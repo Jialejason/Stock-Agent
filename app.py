@@ -134,7 +134,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # B. 获取周线数据 (Weekly - 大周期定趋势)
+    # B. 获取周线数据 (Weekly)
     weekly_status = "周线中性"
     try:
         df_weekly = yf.download(ticker_input, period="2y", interval="1wk", progress=False)
@@ -154,7 +154,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # C. 获取 1 小时盘中数据 (1-Hour - 盘中狙击买点)
+    # C. 获取 1 小时盘中数据 (1-Hour)
     hourly_status = "盘中中性"
     hourly_suggested_entry = cur_price
     hourly_stop_loss = cur_price * 0.985
@@ -226,15 +226,15 @@ def fetch_and_analyze(ticker_input, api_key_val):
     suggested_faqs.append(f"💰 我资金量较小，针对 {ticker_input} 怎么执行科学仓位管理？")
     top_faqs = suggested_faqs[:3]
 
-    # F. Gemini 3.6 生成
+    # F. Gemini 3.6 生成（增强排版规范与逻辑分层）
     ai_analysis_text = ""
     if api_key_val:
         genai.configure(api_key=api_key_val)
         model = genai.GenerativeModel('gemini-3.6-flash')
         
         prompt = f"""
-        你是一名顶级的资深美股操盘手兼新手导师。你的核心教学宗旨是【大道至简】。
-        请根据以下【周线-日线-1小时多周期共振】指标，用极其简明、直白的语言，为零基础小白写一份毫无废话的行动指南。
+        你是一名顶级的资深美股操盘手兼新手导师。你的核心宗旨是【大道至简】。
+        请根据以下【周线-日线-1小时多周期共振】指标，为零基础小白写一份极其简明、直白的行动指南。
 
         【股票标的】: {ticker_input}
         【最新现价】: ${cur_price:.2f}
@@ -249,13 +249,18 @@ def fetch_and_analyze(ticker_input, api_key_val):
         【突发资讯】:
         {news_text if news_text else "暂无突发新闻"}
 
-        请严格按以下 3 个极简板块输出（突出重点，给出具体数字，小白照着做即可）：
+        【排版与逻辑严格要求】：
+        1. 严禁出现孤立星号、错位空格或破坏 Markdown 的符号（如禁止出现 18.44 * 或 ** 17.59 这种断裂）。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
+        2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】，避免小白产生逻辑困惑。
+        3. 直接给数字和执行动作，严禁模棱两可。
+
+        请严格按以下 3 个极简板块输出：
         1. 🚦 **多周期共振定性（红绿灯）**：用 2 句话讲清大趋势是顺风还是逆风？当前是该进攻、该埋伏、还是必须空仓管住手？
         2. 💡 **小白实操动作（直接给数字）**：
-           - **买入建议**：能不能买？如果能买，建议把买单挂在什么精确价格？
-           - **止盈目标**：第一目标位和突破后的加速位看至哪里？
-           - **铁血止损**：跌破哪个精确价位必须无条件止损离场？
-        3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的风险。
+           - **买入决策**：清晰说明当前能否买入。若暂不可买，讲清必须满足什么突破条件才可在哪个精确价格挂单。
+           - **若触发买入后的止盈规划**：第一目标位与突破加速位分别看至哪里？
+           - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
+        3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
         """
         for attempt in range(2):
             try:
@@ -437,9 +442,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     用户的提问是: "{prompt_to_process}"
 
                     请严格遵守以下要求作答：
-                    1. 用通俗易懂的大白话回答，不要堆砌生涩的学术术语。
-                    2. 如果用户对比了两只股票，请结合上述客观数据直接给出优劣排序与清晰的买卖建议。
-                    3. 直接给出数字和具体执行动作，严禁模棱两可。
+                    1. 严禁出现断裂的星号或排版错位，所有关键价格统一规范加粗（如 **$18.04**）。
+                    2. 用通俗易懂的大白话回答，不要堆砌生涩的学术术语。
+                    3. 如果用户对比了两只股票，请结合上述客观数据直接给出优劣排序与清晰的买卖建议。
+                    4. 直接给出数字和具体执行动作，严禁模棱两可。
                     """
                     try:
                         genai.configure(api_key=api_key)
