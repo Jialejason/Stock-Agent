@@ -11,8 +11,8 @@ from ta.volatility import AverageTrueRange
 import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
-st.title("📈 投资小助手 Pro (全维实战闭环版)")
-st.caption("⚡ 5分钟全网共享缓存 ｜ 🧠 深度动态推理 ｜ 🕳️ 缺口/均线共振 ｜ 📰 实时新闻舆情 ｜ ⚖️ 盈亏比大白话")
+st.title("📈 投资小助手 Pro (全维智能实战版)")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 🧠 Gemini 原生智脑 ｜ 🕳️ 缺口/均线共振 ｜ 📰 实时新闻舆情 ｜ ⚖️ 盈亏比大白话")
 
 # 1. 别名映射与 Markdown 安全渲染
 TICKER_ALIASES = {
@@ -46,8 +46,8 @@ def extract_tickers_from_text(input_text):
 # 获取 API Key
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 if not api_key:
-    with st.expander("🔑 配置 Gemini API Key", expanded=True):
-        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取，配置后解锁真正的大模型深度交互")
+    with st.expander("🔑 配置 Gemini API Key (激活真实 AI 思考)", expanded=True):
+        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取，配置后即可自由智能问答")
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -68,7 +68,7 @@ def calculate_volume_profile(df_daily, bins=25):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     return list(zip(bin_centers, vol_profile))
 
-# AI 操盘与全闭环交易推演生成
+# AI 操盘推演生成
 def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
                     macro_sentiment_tag, weekly_status, pit_status, hourly_status, vwap_price, 
                     vwap_status_desc, hourly_suggested_entry, hourly_stop_loss, chip_resistances, 
@@ -129,8 +129,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     
     if api_key_val:
         genai.configure(api_key=api_key_val)
-        models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-        for m_name in models_to_try:
+        for m_name in ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']:
             try:
                 model = genai.GenerativeModel(m_name)
                 res = model.generate_content(prompt)
@@ -166,124 +165,12 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
-# 全维动态变通保底问答引擎 (彻底消灭死板复读)
-def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
-    chips = data['chip_resistances']
-    res1 = chips[0] if chips else cur_price * 1.05
-    res2 = chips[1] if len(chips) > 1 else res1 * 1.08
-    res_top = chips[-1] if len(chips) > 2 else res2 * 1.1
-    sup_short = data.get('gap_support', data['ema20'])
-    prev_close = data.get('prev_close_p', sup_short)
-    ma30_p = data.get('ma30', sup_short * 0.98)
-    sup_deep = data['chip_supports'][0] if data['chip_supports'] else data['hourly_suggested_entry']
-    vwap_p = data['vwap_price']
-    stop_p = data['hourly_stop_loss']
-    rr = data['rr_ratio']
-    
-    if compared_ticker_data:
-        comp_sym = compared_ticker_data['symbol']
-        comp_price = compared_ticker_data['cur_price']
-        return f"""
-针对 **{curr_ticker}**（现价 **${cur_price:.2f}**）与 **{comp_sym}**（现价 **${comp_price:.2f}**）对比：
-
-1. **趋势与支撑结构**：
-   - **{curr_ticker}**：短线缺口支撑 **${sup_short:.2f}**，筹码大底 **${sup_deep:.2f}**，阻力 **${res1:.2f}**。
-   - **{comp_sym}**：周线处于 `{compared_ticker_data['weekly_status']}`。
-2. **买卖建议**：优先配置处于右侧突破形态的龙头，短线回踩优先看缺口支撑。
-"""
-
-    # 1. 动态分析：关于“看涨空间 / 能否站回某价格（如230） / 突破目标”
-    if any(k in prompt_text for k in ["看涨", "涨到", "站回", "230", "259", "目标价", "能涨多少", "突破"]):
-        target_eval = f"**${res1:.2f}**"
-        return f"""
-关于 **{curr_ticker}（现价 ${cur_price:.2f}）能否站回及未来看涨空间推演**：
-
-1. 🎯 **第一道关键门槛：能否站稳 {target_eval}？**
-   - **核心阻力原因**：**${res1:.2f}** 是前期的日线双顶与重度套牢峰，这里的解套抛压最大。
-   - **突破条件**：必须满足**日K线放量站稳 ${res1:.2f} 且收盘不破**。只要成交量放大超过5日均量1.3倍以上，大概率能成功站回。
-2. 🚀 **站稳 {target_eval} 之后的向上空间拓展**：
-   - **第二波段目标**：**${res2:.2f}**（突破颈线后的等距加速位）；
-   - **远期理论大顶**：**${res_top:.2f}**（大级别波段极限拓展位，需配合大盘极度走牛，不可作为短线必定到达的死目标）。
-3. 💡 **操盘建议**：
-   - 现价距离 **${res1:.2f}** 仅有约 **+{((res1-cur_price)/cur_price)*100:.1f}%** 空间，**严禁在阻力位下方盲目追涨**；
-   - 正确做法是等带量突破并回踩确认站稳 **${res1:.2f}** 后顺势加仓，或者等回踩 **${sup_short:.2f}** 支撑企稳后再低吸。
-"""
-
-    # 2. 动态分析：关于“跌破缺口 / 破位应对”
-    elif any(k in prompt_text for k in ["跌破", "回补", "补缺口", "下探到", "破了"]):
-        return f"""
-针对您关于 **{curr_ticker} 跌破 ${sup_short:.2f} 支撑位后的推演与应对**：
-
-1. 🕳️ **破位性质定性**：
-   - 盘中若有效跌破 **${sup_short:.2f}**，代表短线强势动能衰竭，形态转为日线级别深度洗盘调整。
-2. 🎯 **跌破后真正需要关注的入场区间（由近及远）**：
-   - **第一缓冲观察位（MA30波段线）**：**${ma30_p:.2f}** 附近。此处为月度波段线，跌破缺口后不要立即接飞刀，先观察此处是否出现 15分钟/1小时级别的缩量企稳信号。
-   - **第二黄金坑强支撑（筹码大底/MA60季线）**：**${sup_deep:.2f}**。若大盘带崩走深度回调，这里才是大资金主力真正的防守底线。
-3. 🛑 **操作纪律**：
-   - 跌破 **${sup_short:.2f}** 严禁盲目中途抄底，原超短持仓需减仓或止损防守；
-   - 只有等股价下探至 **${ma30_p:.2f} ~ ${sup_deep:.2f}** 区间出现明确止跌阳线，才可右侧重新建仓！
-"""
-
-    # 3. 捕获新闻与消息面提问
-    elif any(k in prompt_text for k in ["新闻", "消息", "利多", "利空", "催化", "事件"]):
-        news_summary = ""
-        if data.get('news_items'):
-            news_summary = "\n".join([f"- **{n['publisher']}**: {n['title']}" for n in data['news_items'][:3]])
-        else:
-            news_summary = "- 近期暂无突发破坏性黑天鹅，以行业常态与基本面主导。"
-
-        return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的消息面定性与实战应对：
-
-1. 📰 **近期核心资讯速览**：
-{news_summary}
-
-2. 🚦 **消息面定性（利多 / 利空）**：
-当前宏观与个股情绪处于【{data['macro_sentiment_tag']}】区间，**整体偏向中性偏多，无突发恶性抛售利空**。
-
-3. 💡 **对股价的具体影响与操盘应对**：
-- **若利好刺激冲高**：绝不盲目追高，需观察日K线能否放量站稳阻力峰 **${res1:.2f}**，谨防主力借利好冲高回落（假突破）；
-- **若利空突发下砸**：只要股价未有效跌破短线缺口/EMA20支撑 **${sup_short:.2f}** 及止损底线 **${stop_p:.2f}**，属于技术性洗盘，切忌恐慌割肉在最低点。
-"""
-
-    # 4. 捕获盈亏比与是否值得买提问
-    elif any(k in prompt_text for k in ["盈亏比", "值得买", "风险", "划算"]):
-        up_pct = ((res1 - cur_price) / cur_price) * 100
-        down_pct = ((cur_price - stop_p) / cur_price) * 100
-        verdict = f"🟢 **结论：非常划算（值得博弈）！**" if rr >= 2.0 else f"🔴 **结论：不划算（风险大于收益，严禁追高）！**"
-        return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易盈亏比大白话核验：
-
-- 🎯 **上行第1目标空间**：**${res1:.2f}** (+{up_pct:.1f}%)
-- 🛑 **下行止损防守底线**：**${stop_p:.2f}** (-{down_pct:.1f}%)
-- ⚖️ **动态盈亏比**：**{rr:.2f} : 1**
-
-{verdict}
-"""
-    # 5. 常规吸筹提问
-    elif any(k in prompt_text for k in ["吸筹", "抄底", "加仓", "接盘"]):
-        return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的双阶梯吸筹方案：
-
-1. 🕳️ **第一阶段（短线缺口/浅回调 15% 仓位）**：挂单于 **${sup_short:.2f}** 附近（对应今日缺口下沿与 EMA20）。
-2. 🛡️ **第二阶段（波段大底 25% 仓位）**：挂单于 **${sup_deep:.2f}**（历史大级别密集峰 / 季线区）。
-3. 🛑 **禁买熔断线**：跌破 **${stop_p:.2f}** 坚决止损。
-"""
-    else:
-        return f"""
-基于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的综合交易推演：
-
-- **短线缺口支撑**：**${sup_short:.2f}** ｜ **筹码大底**：**${sup_deep:.2f}**
-- **阶梯阻力目标**：**${res1:.2f}** ➔ **${res2:.2f}** ➔ **${res_top:.2f}**
-- **防守底线**：**${stop_p:.2f}** ｜ **日内成本**：**${vwap_p:.2f}**
-"""
-
 # 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
     
-    # 宏观大盘与全维情绪监控
+    # 宏观大盘监控
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", auto_adjust=True, progress=False)
     
@@ -400,7 +287,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_ma250 else None
     ma250_str = f"${ma250:.2f}" if ma250 else "上市未满250日"
     
-    # 智能识别近5日跳空缺口
+    # 智能识别缺口
     gap_support = None
     prev_close_p = close_d.iloc[-2] if total_days >= 2 else cur_price
     if total_days >= 2:
@@ -437,7 +324,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     if not chip_resistances: chip_resistances = [round(high_30d, 2), round(high_52w, 2)]
     if not chip_supports: chip_supports = [round(low_30d, 2)]
 
-    # 动态支撑与阻力列表
+    # 动态支撑阻力列表
     resistance_list = []
     support_list = []
     
@@ -551,7 +438,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
     
-    # 抓取实时新闻资讯
+    # 抓取实时新闻
     news_items = []
     try:
         raw_news = ticker_obj.news
@@ -566,7 +453,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
         pass
 
     top_faqs = [
-        f"🚀 {ticker_input} 能否站回上方关键阻力？未来看涨空间如何？",
+        f"🚀 {ticker_input} 能否站回上方关键阻力？继续涨到目标价还有多少%？",
         f"🕳️ {ticker_input} 短线缺口支撑与筹码大底分别是多少？如何分批吸筹？",
         f"⚖️ 当前介入 {ticker_input} 的盈亏比是多少？值得冒这个风险吗？"
     ]
@@ -701,10 +588,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（大模型真实变通推理版）
+    # 5. 专属 AI 操盘助理（100% 真实智能版）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
-    st.caption(f"💡 AI 已挂载 {curr_ticker} 的所有技术量化参数，支持各类“假设/跌破/如果”变通场景推演。")
+    st.caption(f"💡 真正挂载 Gemini 智脑，支持数学空间计算、条件假设推演、个股对比与策略变通。")
 
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
@@ -720,7 +607,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"自由提问（如：能站回230吗？跌破缺口怎么看？新闻利多利空？）...")
+    user_input = st.chat_input(f"自由提问（如：到230有多少%？跌破缺口怎么看？消息面利多吗？）...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -729,10 +616,9 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("Gemini 正在进行全维深度变通推演解答..."):
+            with st.spinner("Gemini 大脑正在全维变通推演计算中..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
-                compared_ticker_data = None
                 extra_data_text = ""
                 
                 for sym in extracted_symbols:
@@ -740,51 +626,49 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         try:
                             other_data, _ = fetch_and_analyze(sym, api_key)
                             if other_data:
-                                compared_ticker_data = other_data
                                 extra_data_text += f"""
                                 【提及标的 {sym} 最新量化数据】:
-                                现价: ${other_data['cur_price']:.2f}, 盈亏比: {other_data['rr_ratio']:.2f}:1, 宏观情绪: {other_data['macro_sentiment_tag']}, VWAP: ${other_data['vwap_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
+                                现价: ${other_data['cur_price']:.2f}, 盈亏比: {other_data['rr_ratio']:.2f}:1, VWAP: ${other_data['vwap_price']:.2f}, 周线: {other_data['weekly_status']}
                                 关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
                                 """
                         except Exception:
                             pass
 
-                if api_key:
-                    genai.configure(api_key=api_key)
-                    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-                    
+                active_key = api_key or st.secrets.get("GEMINI_API_KEY", "")
+                
+                if active_key:
+                    genai.configure(api_key=active_key)
                     news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
                     
                     context_prompt = f"""
-                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心能力是【极度善于变通思考，能够根据用户提出的任何假设性、条件性问题（例如：能站回某点位吗、看涨到多少、跌破某点位怎么办、回补缺口怎么看）进行量身定制的动态推演】。
+                    你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
                     
                     【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
-                    【宏观大盘】: {data['market_status']} ｜ 宏观情绪: {data['macro_sentiment_tag']}
-                    【实时新闻舆情】:
+                    【宏观环境】: {data['market_status']} ｜ 情绪: {data['macro_sentiment_tag']}
+                    【实时资讯】:
                     {news_brief}
+                    【日内成本 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
+                    【均线体系】: EMA20: ${data.get('ema20', 0):.2f} ｜ MA30: ${data.get('ma30', 0):.2f} ｜ MA60: {data.get('ma60_str', '无')} ｜ MA250: {data.get('ma250_str', '无')}
+                    【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘: ${data.get('prev_close_p', data['cur_price']):.2f})
+                    【波段筹码大底】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
+                    【全景密集阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
+                    【1小时参考买点】: ${data['hourly_suggested_entry']:.2f} ｜ 止损防线: ${data['hourly_stop_loss']:.2f}
                     【动态盈亏比】: {data['rr_ratio']:.2f} : 1
-                    【日内持仓成本线 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
-                    【周线大趋势】: {data['weekly_status']} ｜ 日线形态: {data['pit_status']}
-                    【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘基准: ${data.get('prev_close_p', data['cur_price']):.2f})
-                    【日线MA30波段线】: ${data.get('ma30', data['cur_price']):.2f}
-                    【季线MA60】: {data.get('ma60_str', '无')} ｜ 半年线MA120: {data.get('ma120_str', '无')} ｜ 年线MA250: {data.get('ma250_str', '无')}
-                    【波段筹码大底吸筹带】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
-                    【全景密集筹码阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
-                    【动态阻力与目标看板】: {'; '.join(data['resistance_list'])}
-                    【阶梯防守支撑】: {'; '.join(data['support_list'])}
-                    【1小时盘中挂单参考】: ${data['hourly_suggested_entry']:.2f} ｜ 止损: ${data['hourly_stop_loss']:.2f}
                     {extra_data_text}
 
-                    用户的具体提问是: "{prompt_to_process}"
+                    用户的真实提问是: "{prompt_to_process}"
 
-                    【严格作答要求】：
-                    1. 严禁套用任何机械模版！必须直接回答用户提问中的核心关切。
-                       - 若问“能不能站回某价/看涨到多少”，必须详细分析该阻力位的抛压、突破需要的放量条件，以及站稳后的第二/第三目标位；
-                       - 若问“跌破缺口后看多少”，必须从跌破点向下推演更低的支撑区间如MA30与筹码大底，严禁价格倒挂；
-                       - 若问“盈亏比”，直接给大白话结论。
-                    2. 结合给出的具体数字进行逻辑推导，所有价格数字统一紧跟美元符号加粗（例如 **$230.47**）。
-                    3. 语言口吻通俗接地气，直接给散户明确的实操纪律。
+                    【严格执行规则】：
+                    1. 严禁使用任何机械模版！彻底根据用户的具体提问进行针对性解答：
+                       - 如果用户问“到某个价格有多少% / 空间多少”，请直接进行精确数学计算并给出百分比，同时点评突破难度；
+                       - 如果用户问“能不能站回某价”，请分析上方的套牢盘抛压、突破所需的放量条件与确认动作；
+                       - 如果用户问“跌破某支撑怎么办”，请从跌破价格向下推演更低的接力支撑与止损纪律；
+                       - 如果用户问“盈亏比”，用大白话直接给结论（划算/不划算）。
+                    2. 所有涉及的价格数字统一紧跟美元符号加粗（如 **$230.47**，**+4.9%**）。
+                    3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
                     """
+                    
+                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
                     for m_name in models_to_try:
                         try:
                             chat_model = genai.GenerativeModel(m_name)
@@ -792,12 +676,13 @@ if "current_data" in st.session_state and st.session_state.current_data:
                             if chat_resp and chat_resp.text:
                                 reply_text = chat_resp.text
                                 break
-                        except Exception:
-                            time.sleep(0.3)
+                        except Exception as e:
+                            time.sleep(0.2)
                             continue
 
                 if not reply_text:
-                    reply_text = fallback_smart_chat(prompt_to_process, curr_ticker, data['cur_price'], data, compared_ticker_data)
+                    # 只有在完全没有Key或断网时才给出的极端保底
+                    reply_text = f"⚠️ 未能成功唤醒 Gemini 智脑（请在上方配置框或 Streamlit Secrets 中填入有效的 `GEMINI_API_KEY`）。当前根据量化数据推演：{curr_ticker} 现价 **${data['cur_price']:.2f}**，上方阻力位于 **${data['chip_resistances'][0]:.2f}**，缺口支撑位于 **${data.get('gap_support', data['ema20']):.2f}**。"
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
