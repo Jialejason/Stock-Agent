@@ -43,11 +43,15 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 获取 API Key
-api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
+# 获取并清洗 API Key（自动过滤换行符与多余空格，完美兼容 AQ. 令牌）
+raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
+api_key = raw_api_key.strip().replace("\n", "").replace("\r", "")
+
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key (激活真实 AI 思考)", expanded=True):
-        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取，配置后即可自由智能问答")
+        manual_key = st.text_input("Gemini API Key", type="password", help="在此处配置后即可自由智能问答")
+        if manual_key:
+            api_key = manual_key.strip().replace("\n", "").replace("\r", "")
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -170,7 +174,6 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
     
-    # 宏观大盘监控
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", auto_adjust=True, progress=False)
     
@@ -224,7 +227,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 日线获取
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="2y", interval="1d", auto_adjust=True, progress=False)
     if df_daily.empty:
@@ -244,7 +246,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     low_30d = low_d.iloc[-min(30, total_days):].min()
     high_30d = high_d.iloc[-min(30, total_days):].max()
 
-    # 计算 VWAP
     vwap_price = cur_price
     vwap_status_desc = "持平"
     try:
@@ -269,7 +270,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     else:
         vwap_status_desc = "⚖️ 紧贴日内平均成本线（多空平衡）"
 
-    # 全景均线系统
     ema5 = EMAIndicator(close_d, min(5, total_days)).ema_indicator().iloc[-1]
     ema10 = EMAIndicator(close_d, min(10, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close_d, min(20, total_days)).ema_indicator().iloc[-1]
@@ -287,7 +287,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_ma250 else None
     ma250_str = f"${ma250:.2f}" if ma250 else "上市未满250日"
     
-    # 智能识别缺口
     gap_support = None
     prev_close_p = close_d.iloc[-2] if total_days >= 2 else cur_price
     if total_days >= 2:
@@ -308,7 +307,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     avg_vol_5d = vol_d.iloc[-6:-1].mean() if total_days >= 6 else vol_d.mean()
     vol_ratio = (cur_vol / avg_vol_5d) if avg_vol_5d > 0 else 1.0
 
-    # 筹码分布提取
     df_recent_1y = df_daily.iloc[-min(252, total_days):]
     vp = calculate_volume_profile(df_recent_1y, bins=25)
     chip_resistances = []
@@ -324,7 +322,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     if not chip_resistances: chip_resistances = [round(high_30d, 2), round(high_52w, 2)]
     if not chip_supports: chip_supports = [round(low_30d, 2)]
 
-    # 动态支撑阻力列表
     resistance_list = []
     support_list = []
     
@@ -365,7 +362,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
         tag = "主力波段大底吸筹带" if idx == 0 else "大级别筑底防守带"
         support_list.append(f"🛡️ 【{tag}】: ${sp:.2f}")
 
-    # 形态定性
     pit_status = "正常走势"
     if rsi_d < 38 and cur_price <= low_30d * 1.03:
         pit_status = "💎 极端超卖黄金坑：指标极度冰点超跌，存在高盈亏比反转机会！"
@@ -374,7 +370,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # 周线数据
     weekly_status = "周线中性"
     try:
         df_weekly = yf.download(ticker_input, period="2y", interval="1wk", auto_adjust=True, progress=False)
@@ -394,7 +389,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 1小时盘中数据
     hourly_status = "盘中中性"
     hourly_suggested_entry = cur_price
     hourly_stop_loss = cur_price * 0.985
@@ -420,7 +414,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 盈亏比自动核算
     target1_p = chip_resistances[0] if chip_resistances else high_30d
     reward_space = max(0.01, target1_p - cur_price)
     risk_space = max(0.01, cur_price - hourly_stop_loss)
@@ -438,7 +431,6 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
     
-    # 抓取实时新闻
     news_items = []
     try:
         raw_news = ticker_obj.news
@@ -566,7 +558,6 @@ if "current_data" in st.session_state and st.session_state.current_data:
     rr_delta = "🟢 优秀" if data['rr_ratio'] >= 2.0 else "⚠️ 一般"
     col_m3.metric(label="动态盈亏比", value=f"{data['rr_ratio']:.2f} : 1", delta=rr_delta)
 
-    # 实时新闻折叠展板
     if data['news_items']:
         with st.expander(f"📰 {curr_ticker} 实时盘中资讯与新闻催化剂 ({len(data['news_items'])} 条)", expanded=False):
             for n in data['news_items']:
@@ -588,7 +579,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（100% 真实智能版）
+    # 5. 专属 AI 操盘助理（自动清洗并直连智脑版）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 真正挂载 Gemini 智脑，支持数学空间计算、条件假设推演、个股对比与策略变通。")
@@ -634,11 +625,9 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         except Exception:
                             pass
 
-                active_key = api_key or st.secrets.get("GEMINI_API_KEY", "")
-                
-                if active_key:
-                    genai.configure(api_key=active_key)
-                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
+                if api_key:
+                    genai.configure(api_key=api_key)
+                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]] if data['news_items'] else "无突发新闻"
                     
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
@@ -676,13 +665,12 @@ if "current_data" in st.session_state and st.session_state.current_data:
                             if chat_resp and chat_resp.text:
                                 reply_text = chat_resp.text
                                 break
-                        except Exception as e:
+                        except Exception:
                             time.sleep(0.2)
                             continue
 
                 if not reply_text:
-                    # 只有在完全没有Key或断网时才给出的极端保底
-                    reply_text = f"⚠️ 未能成功唤醒 Gemini 智脑（请在上方配置框或 Streamlit Secrets 中填入有效的 `GEMINI_API_KEY`）。当前根据量化数据推演：{curr_ticker} 现价 **${data['cur_price']:.2f}**，上方阻力位于 **${data['chip_resistances'][0]:.2f}**，缺口支撑位于 **${data.get('gap_support', data['ema20']):.2f}**。"
+                    reply_text = f"⚠️ 智脑调用波动，当前根据量化数据推演：{curr_ticker} 现价 **${data['cur_price']:.2f}**，上方阻力位于 **${data['chip_resistances'][0]:.2f}**，缺口支撑位于 **${data.get('gap_support', data['ema20']):.2f}**。"
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
