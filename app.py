@@ -112,7 +112,8 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             if api_key_input:
                 try:
                     genai.configure(api_key=api_key_input)
-                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    model = genai.GenerativeModel('gemini-2.0-flash')
+
                     
                     prompt = f"""
                     你是一名资深的职业美股操盘手兼新手导师。请根据以下技术与量化数据，用最通俗易懂、接地气的大白话给完全不懂技术指标的新手写一份简明诊断指南。
