@@ -12,7 +12,7 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (全维实战闭环版)")
-st.caption("⚡ 5分钟全网共享缓存 ｜ 🕳️ 缺口/EMA20双阶梯支撑 ｜ 📰 实时新闻舆情 ｜ 🌐 宏观情绪雷达 ｜ ⚖️ 盈亏比大白话 ｜ 🎯 阶梯止盈")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 🕳️ 缺口/EMA20双阶梯支撑 ｜ 📰 实时新闻舆情精准研判 ｜ 🌐 宏观情绪雷达 ｜ ⚖️ 盈亏比大白话 ｜ 🎯 阶梯止盈")
 
 # 1. 别名映射与 Markdown 安全渲染
 TICKER_ALIASES = {
@@ -166,7 +166,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
-# AI 深度问答保底 (多层阶梯支撑版)
+# AI 深度问答保底 (优化：精准匹配新闻与消息面问答，彻底杜绝答非所问)
 def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
     chips = data['chip_resistances']
     res1 = chips[0] if chips else cur_price * 1.05
@@ -190,19 +190,30 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 2. **买卖建议**：优先配置处于右侧突破形态的龙头，短线回踩优先看缺口支撑。
 """
 
-    if "缺口" in prompt_text or "216" in prompt_text or "抄底" in prompt_text or "吸筹" in prompt_text or "接盘" in prompt_text:
-        return f"""
-关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的双阶梯吸筹与缺口实战解析：
+    # 1. 优先捕获新闻与消息面提问
+    if any(k in prompt_text for k in ["新闻", "消息", "利多", "利空", "催化", "事件"]):
+        news_summary = ""
+        if data.get('news_items'):
+            news_summary = "\n".join([f"- **{n['publisher']}**: {n['title']}" for n in data['news_items'][:3]])
+        else:
+            news_summary = "- 近期暂无突发破坏性黑天鹅，以行业常态与基本面主导。"
 
-1. 🕳️ **第一阶段：短线缺口/浅回调点位（15% 仓位）**
-   - **挂单区间**：**${sup_short:.2f}** 附近（对应今日跳空缺口下沿与日线 EMA20 生命线）。
-   - **逻辑**：强势多头行情中的浅回调，回踩不补缺口即是极佳的短线顺势加仓点。
-2. 🛡️ **第二阶段：大级别波段筹码大底（25% 仓位）**
-   - **挂单区间**：**${sup_deep:.2f}**（历史大级别成交量密集峰 / 季线支撑区）。
-   - **逻辑**：万一大盘调整带崩股价，属于黄金坑极限吸筹位。
-3. 🛑 **禁买熔断线**：跌破 **${stop_p:.2f}** 坚决止损，严禁越跌越补。
+        return f"""
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的消息面定性与实战应对：
+
+1. 📰 **近期核心资讯速览**：
+{news_summary}
+
+2. 🚦 **消息面定性（利多 / 利空）**：
+当前宏观与个股情绪处于【{data['macro_sentiment_tag']}】区间，**整体偏向中性偏多，无突发恶性抛售利空**。
+
+3. 💡 **对股价的具体影响与操盘应对**：
+- **若利好刺激冲高**：绝不盲目追高，需观察日K线能否放量站稳阻力峰 **${res1:.2f}**，谨防主力借利好冲高回落（假突破）；
+- **若利空突发下砸**：只要股价未有效跌破短线缺口/EMA20支撑 **${sup_short:.2f}** 及止损底线 **${stop_p:.2f}**，属于技术性洗盘，切忌恐慌割肉在最低点。
 """
-    elif "盈亏比" in prompt_text or "值得买" in prompt_text or "风险" in prompt_text:
+
+    # 2. 捕获盈亏比与是否值得买提问
+    elif any(k in prompt_text for k in ["盈亏比", "值得买", "风险", "划算"]):
         up_pct = ((res1 - cur_price) / cur_price) * 100
         down_pct = ((cur_price - stop_p) / cur_price) * 100
         
@@ -219,6 +230,20 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 - ⚖️ **动态盈亏比**：**{rr:.2f} : 1**
 
 {verdict}
+"""
+
+    # 3. 捕获抄底/吸筹/缺口提问
+    elif any(k in prompt_text for k in ["缺口", "216", "抄底", "吸筹", "加仓", "接盘"]):
+        return f"""
+关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的双阶梯吸筹与缺口实战解析：
+
+1. 🕳️ **第一阶段：短线缺口/浅回调点位（15% 仓位）**
+   - **挂单区间**：**${sup_short:.2f}** 附近（对应今日跳空缺口下沿与日线 EMA20 生命线）。
+   - **逻辑**：强势多头行情中的浅回调，回踩不补缺口即是极佳的短线顺势加仓点。
+2. 🛡️ **第二阶段：大级别波段筹码大底（25% 仓位）**
+   - **挂单区间**：**${sup_deep:.2f}**（历史大级别成交量密集峰 / 季线支撑区）。
+   - **逻辑**：万一大盘调整带崩股价，属于黄金坑极限吸筹位。
+3. 🛑 **禁买熔断线**：跌破 **${stop_p:.2f}** 坚决止损，严禁越跌越补。
 """
     elif "止盈" in prompt_text or "清仓" in prompt_text:
         return f"""
@@ -524,9 +549,9 @@ def fetch_and_analyze(ticker_input, api_key_val):
         pass
 
     top_faqs = [
+        f"📰 {ticker_input} 近期新闻消息面是利多还是利空？对股价有何具体影响？",
         f"🕳️ {ticker_input} 短线缺口支撑与筹码大底分别是多少？如何分批吸筹？",
-        f"⚖️ 当前介入 {ticker_input} 的盈亏比是多少？值得冒这个风险吗？",
-        f"📰 {ticker_input} 近期新闻消息面是利多还是利空？对股价有何具体影响？"
+        f"⚖️ 当前介入 {ticker_input} 的盈亏比是多少？值得冒这个风险吗？"
     ]
 
     now_utc = datetime.now(timezone.utc)
@@ -685,7 +710,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("AI 操盘手正在针对缺口支撑与双向闭环深度推演解答..."):
+            with st.spinner("AI 操盘手正在针对新闻舆情与双向闭环深度推演解答..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 compared_ticker_data = None
@@ -733,9 +758,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
                     【严格作答要求】：
                     1. 严禁使用笼统模版！直接针对用户的问题作答。
-                    2. 若用户询问抄底/吸筹/加仓，务必区分【短线缺口/浅回调点位】与【深回调波段筹码大底】两个阶梯！
-                    3. 若涉及盈亏比/是否值得买，计算后必须直接给出通俗大白话结论（如：“结论：不划算/划算，相当于冒着亏 X 块的风险去博 Y 块的利润...”）。
-                    4. 所有价格数字必须紧跟美元符号规范加粗（例如 **$18.40**）。
+                    2. 若用户询问新闻/消息面，必须先明确给出定性（利多 / 利空 / 中性偏多），并结合点位说明如何应对；
+                    3. 若用户询问抄底/吸筹/加仓，务必区分【短线缺口/浅回调点位】与【深回调波段筹码大底】两个阶梯！
+                    4. 若涉及盈亏比/是否值得买，计算后必须直接给出通俗大白话结论（如：“结论：不划算/划算，相当于冒着亏 X 块的风险去博 Y 块的利润...”）。
+                    5. 所有价格数字必须紧跟美元符号规范加粗（例如 **$18.40**）。
                     """
                     for m_name in models_to_try:
                         try:
