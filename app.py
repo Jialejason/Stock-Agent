@@ -9,7 +9,7 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (量化风控全维版)")
-st.caption("融合【宏观大盘/VIX情绪/阶梯阻力/黄金坑雷达】与 Gemini AI 保姆级大白话实操指南")
+st.caption("融合【宏观大盘/VIX情绪/阶梯阻力/黄金坑/盘后异动雷达】与 Gemini AI 保姆级大白话指南")
 
 # 1. 获取 API Key (优先从 Secrets 读取，其次从界面输入)
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
@@ -43,7 +43,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
         if len(st.session_state.history_tickers) > 5:
             st.session_state.history_tickers.pop()
 
-    with st.spinner(f"正在全维度诊断宏观局势、黄金坑形态与 {ticker_input}..."):
+    with st.spinner(f"正在全维度诊断宏观局势、盘后资金与 {ticker_input}..."):
         # 1. 宏观四维雷达 (SPY, QQQ, VIX, TNX)
         macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
         macro_data = yf.download(macro_tickers, period="3mo", interval="1d", progress=False)
@@ -94,6 +94,17 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             
             cur_price = close.iloc[-1]
             total_days = len(close)
+
+            # 盘前/盘后实时价格与异动捕获
+            ext_price_str = ""
+            try:
+                latest_realtime = ticker_obj.fast_info.last_price
+                if latest_realtime and abs(latest_realtime - cur_price) / cur_price >= 0.02:
+                    diff_pct = ((latest_realtime - cur_price) / cur_price) * 100
+                    tag = "🚀 盘后/盘前跳空大涨" if diff_pct > 0 else "🩸 盘后/盘前跳空暴跌"
+                    ext_price_str = f"{tag} {diff_pct:+.2f}% (最新挂单价: ${latest_realtime:.2f})"
+            except Exception:
+                pass
             
             # 关键均线
             ema5 = EMAIndicator(close, min(5, total_days)).ema_indicator().iloc[-1]
@@ -192,17 +203,22 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             else: st.success(f"**大盘风控:** {market_status}")
             
             st.info(f"🌐 **宏观全维监控：** {vix_status_str} ｜ 🏛️ {tnx_status_str}")
+
+            # 盘后大级别异动弹窗
+            if ext_price_str:
+                st.warning(f"⚡ **盘前/盘后剧烈异动提醒：** {ext_price_str}")
+
             if "💎" in pit_status or "🧱" in pit_status:
                 st.success(f"🎯 **形态雷达:** {pit_status}")
             else:
                 st.warning(f"🎯 **形态雷达:** {pit_status}")
                 
             col_m1, col_m2 = st.columns(2)
-            col_m1.metric(label=f"{ticker_input} 最新价", value=f"${cur_price:.2f}")
+            col_m1.metric(label=f"{ticker_input} 最新收盘价", value=f"${cur_price:.2f}")
             vol_status = "🔥 放量" if vol_ratio > 1.3 else "🧊 缩量" if vol_ratio < 0.7 else "⚖️ 平量"
             col_m2.metric(label="5日量比", value=f"{vol_ratio:.2f} 倍", delta=vol_status)
 
-            # 6. 🤖 Gemini AI 操盘解读 (黄金坑与点位全输出)
+            # 6. 🤖 Gemini AI 操盘解读 (融合盘后与量价)
             st.subheader("🤖 Gemini 操盘手大白话解读")
             if api_key:
                 try:
@@ -210,10 +226,11 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     
                     prompt = f"""
-                    你是一名资深的职业美股操盘手兼新手导师。请结合宏观大盘、美债利率/恐慌情绪、阶梯阻力支撑，以及当前算法识别出的【形态雷达】状态，用通俗易懂的大白话为新手写一份诊断指南。
+                    你是一名资深的职业美股操盘手兼新手导师。请结合宏观大盘、美债利率/恐慌情绪、盘后异动（如有）、阶梯阻力支撑，以及当前算法识别出的【形态雷达】状态，用通俗易懂的大白话为新手写一份诊断指南。
 
                     【股票标的】: {ticker_input}
-                    【最新价格】: ${cur_price:.2f}
+                    【最新收盘价】: ${cur_price:.2f}
+                    【盘前/盘后异动】: {ext_price_str if ext_price_str else "无显著异动 (波动<2%)"}
                     【大盘宏观 (SPY/QQQ)】: {market_status}
                     【市场情绪与利率 (VIX/TNX)】: {vix_status_str} ｜ {tnx_status_str}
                     【形态雷达状态】: {pit_status}
@@ -225,11 +242,11 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
                     {news_text if news_text else "暂无突发新闻"}
 
                     请直接按以下 3 个结构输出（言简意赅，指令明确）：
-                    1. 🧐 **形态与黄金坑定性**：用 2 句话讲清当前股票处于强势拉升、还是砸出了黄金坑/右侧企稳、亦或处于危险破位期？
+                    1. 🧐 **形态与黄金坑定性**：用 2 句话讲清当前股票处于强势拉升、还是砸出了黄金坑/右侧企稳、亦或处于危险破位期？（如果盘后有大异动请一并指出）
                     2. 💡 **新手实操动作**：明确告诉新手目前能不能买？如果想买该挂在什么具体价位？突破阻力后下一目标看到哪里？如果在场内跌破哪个价位必须立刻止损认错？
                     3. ⚠️ **核心避险警示**：结合大盘、财报倒计时或缩量/放量异动，提醒新手当前最需要防范的坑是什么？
                     """
-                    with st.spinner("🤖 Gemini 正在全维诊断黄金坑与阶梯点位..."):
+                    with st.spinner("🤖 Gemini 正在全维诊断黄金坑、盘后异动与阶梯点位..."):
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
                 except Exception as e:
@@ -251,4 +268,4 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             st.write(f"- **MACD 状态:** `{macd_str}` (柱值: {macd_diff:.2f})")
             st.write(f"- **RSI (14):** `{rsi:.2f}` ({'⚠️ 超买' if rsi > 70 else '💎 极端超卖/黄金坑区' if rsi < 38 else '⚖️ 中性'})")
             st.write(f"- **日均真实波幅 (ATR):** `${atr:.2f}`")
-                              
+                                           
