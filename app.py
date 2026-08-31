@@ -112,7 +112,8 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             if api_key_input:
                 try:
                     genai.configure(api_key=api_key_input)
-                    model = genai.GenerativeModel('gemini-2.0-flash')
+                    model = genai.GenerativeModel('gemini-3.6-flash')
+
 
                     
                     prompt = f"""
