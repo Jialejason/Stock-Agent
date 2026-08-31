@@ -11,21 +11,20 @@ st.set_page_config(page_title="投资小助手", layout="centered")
 st.title("📈 投资小助手")
 st.caption("输入美股代码，秒级诊断量价结构与 Gemini AI 保姆级大白话解读")
 
-# 获取 API Key (优先从 Secrets 读取，其次从界面输入)
+# 1. 获取 API Key (优先从 Secrets 读取，其次从界面输入)
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
-# 初始化历史搜索/自选列表
+# 2. 动态自选与历史搜索栏
 if "history_tickers" not in st.session_state:
     st.session_state.history_tickers = ["SPCX", "NVDA", "TSLA", "AAPL"]
 
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = "SPCX"
 
-# 动态展示自选与最近查询按钮
 st.write("**🔥 快速自选与最近查询:**")
 cols = st.columns(len(st.session_state.history_tickers))
 for i, ticker in enumerate(st.session_state.history_tickers):
@@ -34,8 +33,9 @@ for i, ticker in enumerate(st.session_state.history_tickers):
 
 ticker_input = st.text_input("美股代码", value=st.session_state.selected_ticker).strip().upper()
 
+# 3. 诊断主逻辑
 if st.button("开始全维度深度诊断", type="primary", use_container_width=True):
-    # 动态加入历史查询栏（保留最新 5 个）
+    # 更新动态自选栏（将当前查询推到最前，保留最新 5 个）
     if ticker_input and ticker_input in st.session_state.history_tickers:
         st.session_state.history_tickers.remove(ticker_input)
     if ticker_input:
@@ -44,20 +44,29 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             st.session_state.history_tickers.pop()
 
     with st.spinner(f"正在全维度诊断大盘、主力动向与 {ticker_input}..."):
-        # 1. 大盘环境诊断 (标普 500 SPY)
+        # 1. 标普(SPY) + 纳指(QQQ) 双引擎宏观风控
         spy_df = yf.download("SPY", period="6mo", interval="1d", progress=False)
-        spy_status = "正常"
-        if not spy_df.empty:
-            if isinstance(spy_df.columns, pd.MultiIndex):
-                spy_df.columns = spy_df.columns.get_level_values(0)
-            spy_close = spy_df['Close'].dropna()
-            spy_ema20 = EMAIndicator(spy_close, 20).ema_indicator().iloc[-1]
-            if spy_close.iloc[-1] < spy_ema20:
-                spy_status = "⚠️ 大盘 (SPY) 跌破短期均线，系统性风险上升，全市场宜防守！"
-            else:
-                spy_status = "🟢 大盘 (SPY) 处于多头健康区间，市场环境支持顺势交易。"
+        qqq_df = yf.download("QQQ", period="6mo", interval="1d", progress=False)
         
-        # 2. 个股数据拉取与清洗
+        market_status = "🟢 顺势顺风：标普(SPY) 与 纳指(QQQ) 均处于多头健康区间，市场环境支持顺势交易。"
+        if not spy_df.empty and not qqq_df.empty:
+            if isinstance(spy_df.columns, pd.MultiIndex): spy_df.columns = spy_df.columns.get_level_values(0)
+            if isinstance(qqq_df.columns, pd.MultiIndex): qqq_df.columns = qqq_df.columns.get_level_values(0)
+            
+            spy_close = spy_df['Close'].dropna().iloc[-1]
+            spy_ema20 = EMAIndicator(spy_df['Close'].dropna(), 20).ema_indicator().iloc[-1]
+            
+            qqq_close = qqq_df['Close'].dropna().iloc[-1]
+            qqq_ema20 = EMAIndicator(qqq_df['Close'].dropna(), 20).ema_indicator().iloc[-1]
+            
+            if spy_close < spy_ema20 and qqq_close < qqq_ema20:
+                market_status = "🔴 极度预警：标普(SPY) 与 纳指(QQQ) 均跌破EMA20生命线，全市场重度防守！"
+            elif qqq_close < qqq_ema20:
+                market_status = "⚠️ 结构分化：纳指(QQQ) 破位走弱，科技与成长股存在杀跌风险，操作宜谨慎！"
+            elif spy_close < spy_ema20:
+                market_status = "⚠️ 警示：标普(SPY) 跌破均线，传统权重走弱，防范系统性回调！"
+
+        # 2. 个股数据清洗与量化计算
         ticker_obj = yf.Ticker(ticker_input)
         df = yf.download(ticker_input, period="1y", interval="1d", progress=False)
         
@@ -75,7 +84,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             cur_price = close.iloc[-1]
             total_days = len(close)
             
-            # 均线
+            # 关键均线
             ema5 = EMAIndicator(close, min(5, total_days)).ema_indicator().iloc[-1]
             ema10 = EMAIndicator(close, min(10, total_days)).ema_indicator().iloc[-1]
             ema20 = EMAIndicator(close, min(20, total_days)).ema_indicator().iloc[-1]
@@ -83,7 +92,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             ma60 = SMAIndicator(close, 60).sma_indicator().iloc[-1] if has_ma60 else ema20
             ma60_str = f"${ma60:.2f}" if has_ma60 else "上市未满60日"
             
-            # 动能 & 波动率
+            # 动能指标与波动率
             rsi_series = RSIIndicator(close, min(14, total_days)).rsi()
             rsi = rsi_series.iloc[-1]
             macd_obj = MACD(close)
@@ -92,7 +101,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             macd_diff = macd_obj.macd_diff().iloc[-1]
             atr = AverageTrueRange(high, low, close, min(14, total_days)).average_true_range().iloc[-1]
             
-            # 成交量与量比
+            # 量比算法
             cur_vol = volume.iloc[-1]
             avg_vol_5d = volume.iloc[-6:-1].mean() if total_days >= 6 else volume.mean()
             vol_ratio = (cur_vol / avg_vol_5d) if avg_vol_5d > 0 else 1.0
@@ -100,7 +109,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             recent_high = high.iloc[-min(30, total_days):].max()
             recent_low = low.iloc[-min(30, total_days):].min()
             
-            # 3. 财报日获取
+            # 3. 财报日追踪
             earnings_date_str = "暂无近期数据"
             try:
                 cal = ticker_obj.get_calendar()
@@ -112,16 +121,20 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             except Exception:
                 pass
             
-            # 顶部看板
-            if "⚠️" in spy_status: st.warning(f"**大盘风控提示:** {spy_status}")
-            else: st.success(f"**大盘风控提示:** {spy_status}")
+            # 顶部状态与核心指标看板
+            if "🔴" in market_status:
+                st.error(f"**大盘风控提示:** {market_status}")
+            elif "⚠️" in market_status:
+                st.warning(f"**大盘风控提示:** {market_status}")
+            else:
+                st.success(f"**大盘风控提示:** {market_status}")
                 
             col_m1, col_m2 = st.columns(2)
             col_m1.metric(label=f"{ticker_input} 最新价", value=f"${cur_price:.2f}")
             vol_status = "🔥 放量" if vol_ratio > 1.3 else "🧊 缩量" if vol_ratio < 0.7 else "⚖️ 平量"
             col_m2.metric(label="5日量比", value=f"{vol_ratio:.2f} 倍", delta=vol_status)
 
-            # 新闻抓取
+            # 新闻摘要抓取
             news_text = ""
             try:
                 news_list = ticker_obj.news
@@ -132,7 +145,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             except Exception:
                 pass
 
-            # 4. 🤖 Gemini AI 智能解读模块
+            # 4. 🤖 Gemini AI 智能操盘解读模块
             st.subheader("🤖 Gemini 操盘手大白话解读")
             if api_key:
                 try:
@@ -144,7 +157,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
 
                     【股票标的】: {ticker_input}
                     【最新价格】: ${cur_price:.2f}
-                    【大盘环境】: {spy_status}
+                    【大盘环境】: {market_status}
                     【均线数据】: EMA5=${ema5:.2f}, EMA10=${ema10:.2f}, EMA20=${ema20:.2f}, MA60={ma60_str}
                     【动能与量能】: RSI={rsi:.2f}, MACD柱值={macd_diff:.2f}, 5日量比={vol_ratio:.2f}倍
                     【关键阻力与支撑】: 30日最高阻力=${recent_high:.2f}, 30日最低强支撑=${recent_low:.2f}
@@ -165,7 +178,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             else:
                 st.info("💡 请填入你的 Gemini API Key 以激活 AI 解读。")
 
-            # 支撑与阻力
+            # 支撑与阻力位
             st.subheader("🛡️ 关键支撑与阻力位")
             col1, col2 = st.columns(2)
             supports, resistances = [], []
@@ -176,7 +189,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             with col1: st.info("\n\n".join(supports))
             with col2: st.warning("\n\n".join(resistances))
             
-            # 动能指标
+            # 动能与量价特征
             st.subheader("⚡ 动能与量价特征")
             macd_str = "🟢 多头金叉（动能充沛）" if macd_val > macd_signal and macd_diff > 0 else "🔴 动能减弱/死叉休整"
             st.write(f"- **MACD 状态:** `{macd_str}` (柱值: {macd_diff:.2f})")
