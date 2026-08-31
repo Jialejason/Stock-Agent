@@ -20,6 +20,24 @@ if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
+# 辅助函数：多模型轮询调用
+def generate_ai_response(prompt_text, api_key_val):
+    if not api_key_val:
+        return ""
+    genai.configure(api_key=api_key_val)
+    # 官方标准稳定模型降级链
+    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+    for m_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(m_name)
+            res = model.generate_content(prompt_text)
+            if res and res.text:
+                return res.text
+        except Exception:
+            time.sleep(0.5)
+            continue
+    raise Exception("API_RATE_LIMIT")
+
 # 2. 核心量化算法（多周期共振 + 5分钟智能全局共享缓存）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
@@ -59,7 +77,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # A. 获取日线数据 (Daily - 形态与阶梯阻力支撑)
+    # A. 获取日线数据 (Daily)
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="1y", interval="1d", progress=False)
     
@@ -226,18 +244,15 @@ def fetch_and_analyze(ticker_input, api_key_val):
     suggested_faqs.append(f"💰 我资金量较小，针对 {ticker_input} 怎么执行科学仓位管理？")
     top_faqs = suggested_faqs[:3]
 
-    # F. 双时区时间戳换算 (本地 UTC+8 与 美东 ET)
+    # F. 双时区时间戳换算
     now_utc = datetime.now(timezone.utc)
     local_time_str = (now_utc + timedelta(hours=8)).strftime("%H:%M:%S")
-    et_time_str = (now_utc - timedelta(hours=4)).strftime("%H:%M:%S") # 夏令时美东 UTC-4
+    et_time_str = (now_utc - timedelta(hours=4)).strftime("%H:%M:%S")
     cache_display_time = f"{local_time_str} 本地 ｜ {et_time_str} 美东"
 
-    # G. Gemini AI 生成与自愈逻辑 (核心防假死重构)
+    # G. AI 生成与排版强化
     ai_analysis_text = ""
     if api_key_val:
-        genai.configure(api_key=api_key_val)
-        model = genai.GenerativeModel('gemini-3.6-flash')
-        
         prompt = f"""
         你是一名顶级的资深美股操盘手兼新手导师。你的核心宗旨是【大道至简】。
         请根据以下【周线-日线-1小时多周期共振】指标，为零基础小白写一份极其简明、直白的行动指南。
@@ -256,8 +271,8 @@ def fetch_and_analyze(ticker_input, api_key_val):
         {news_text if news_text else "暂无突发新闻"}
 
         【排版与逻辑严格要求】：
-        1. 严禁出现断裂的星号或错位格式（禁止出现 18.44 * 或 ** 17.59 这种断裂）。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
-        2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】，避免小白产生逻辑困惑。
+        1. 严禁出现断裂的星号或错位格式。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
+        2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】。
         3. 直接给数字和执行动作，严禁模棱两可。
 
         请严格按以下 3 个极简板块输出：
@@ -268,23 +283,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
            - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
         3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
         """
-        for attempt in range(3):
-            try:
-                response = model.generate_content(prompt)
-                if response and response.text:
-                    ai_analysis_text = response.text
-                    break
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                else:
-                    break
-
-        # 核心防假死：如果 3 次重试后仍限流，绝不缓存错误，直接抛出异常让 Streamlit 稍后自动重连
-        if not ai_analysis_text:
-            raise Exception("API_RATE_LIMIT")
+        ai_analysis_text = generate_ai_response(prompt, api_key_val)
 
     result_bundle = {
         "market_status": market_status,
@@ -394,7 +393,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（智能 FAQ 胶囊 + 跨标的秒调共享缓存）
+    # 5. 专属 AI 操盘助理
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 AI 已自动同步 {curr_ticker} 的最新量化数据，支持一键点击热门实战疑问，或输入其他股票（如 TSLA/AAPL）进行横向对比。")
@@ -416,7 +415,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 统一处理输入（来自底部输入框 或 点击 FAQ 胶囊）
+    # 统一处理输入
     user_input = st.chat_input(f"问问关于 {curr_ticker} 或对比其他股票（如 TSLA/AAPL）...")
     prompt_to_process = user_input or clicked_faq
 
@@ -464,10 +463,8 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     4. 直接给出数字和具体执行动作，严禁模棱两可。
                     """
                     try:
-                        genai.configure(api_key=api_key)
-                        chat_model = genai.GenerativeModel('gemini-3.6-flash')
-                        chat_resp = chat_model.generate_content(context_prompt)
-                        st.markdown(chat_resp.text)
-                        st.session_state.chat_history.append({"role": "assistant", "content": chat_resp.text})
+                        reply = generate_ai_response(context_prompt, api_key)
+                        st.markdown(reply)
+                        st.session_state.chat_history.append({"role": "assistant", "content": reply})
                     except Exception as e:
-                        st.error(f"回复遇到问题: {e}")
+                        st.error("AI 助理暂时遇到频率限制，请稍候 5 秒重试。")
