@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
+import time
 from ta.trend import EMAIndicator, SMAIndicator, MACD
 from ta.momentum import RSIIndicator
 from ta.volatility import AverageTrueRange
@@ -9,19 +10,19 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (量化风控全维版)")
-st.caption("⚡ 5分钟智能缓存共享 ｜ 宏观/VIX情绪 ｜ 阶梯阻力/黄金坑 ｜ 多引擎自动容灾")
+st.caption("⚡ 5分钟智能缓存共享 ｜ 宏观/VIX情绪 ｜ 阶梯阻力/黄金坑 ｜ Gemini 3.6 深度操盘")
 
-# 1. 获取 API Key
+# 1. 获取 API Key (优先从 Streamlit Secrets 自动读取)
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=False):
         api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
 
-# 2. 核心数据与 AI 分析智能缓存函数 (5分钟 TTL，全员共享)
+# 2. 核心量化算法与 AI 诊断函数 (5分钟智能内存缓存，全网共享)
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
-    # 宏观监控
+    # 宏观监控 (SPY, QQQ, VIX, TNX)
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", progress=False)
     
@@ -54,12 +55,12 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 个股量化
+    # 个股数据清洗与量化
     ticker_obj = yf.Ticker(ticker_input)
     df = yf.download(ticker_input, period="1y", interval="1d", progress=False)
     
     if df.empty:
-        return None, "未找到该股票数据，请检查代码是否正确。"
+        return None, "未找到该股票数据，请检查美股代码是否输入正确。"
         
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -72,6 +73,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     cur_price = close.iloc[-1]
     total_days = len(close)
     
+    # 均线系统
     ema5 = EMAIndicator(close, min(5, total_days)).ema_indicator().iloc[-1]
     ema10 = EMAIndicator(close, min(10, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close, min(20, total_days)).ema_indicator().iloc[-1]
@@ -79,6 +81,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     ma60 = SMAIndicator(close, 60).sma_indicator().iloc[-1] if has_ma60 else ema20
     ma60_str = f"${ma60:.2f}" if has_ma60 else "上市未满60日"
     
+    # 动能指标与波幅
     rsi_series = RSIIndicator(close, min(14, total_days)).rsi()
     rsi = rsi_series.iloc[-1]
     macd_obj = MACD(close)
@@ -87,11 +90,12 @@ def fetch_and_analyze(ticker_input, api_key_val):
     macd_diff = macd_obj.macd_diff().iloc[-1]
     atr = AverageTrueRange(high, low, close, min(14, total_days)).average_true_range().iloc[-1]
     
+    # 5日量比
     cur_vol = volume.iloc[-1]
     avg_vol_5d = volume.iloc[-6:-1].mean() if total_days >= 6 else volume.mean()
     vol_ratio = (cur_vol / avg_vol_5d) if avg_vol_5d > 0 else 1.0
 
-    # 阶梯阻力与支撑
+    # 阶梯式动态阻力与多维支撑
     high_30d = high.iloc[-min(30, total_days):].max()
     high_120d = high.iloc[-min(120, total_days):].max() if total_days >= 30 else high_30d
     high_52w = high.max()
@@ -120,7 +124,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     support_list.append(f"中期生命线 (MA60): {ma60_str}")
     support_list.append(f"30日筑底强支撑: ${low_30d:.2f}")
 
-    # 形态雷达
+    # 形态雷达与黄金坑判定
     pit_status = "正常走势"
     if rsi < 38 and cur_price <= low_30d * 1.03:
         pit_status = "💎 极端超卖黄金坑：指标极度冰点超跌，存在高盈亏比反弹反转机会！"
@@ -129,7 +133,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
     elif cur_price < ema20 and vol_ratio < 0.7:
         pit_status = "🧊 缩量磨底中：跌破均线但抛压衰竭，等待放量企稳确认。"
 
-    # 财报与新闻
+    # 财报与突发新闻
     earnings_date_str = "暂无近期数据"
     try:
         cal = ticker_obj.get_calendar()
@@ -151,10 +155,12 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # Gemini 自动轮询容灾生成
+    # Gemini 3.6 生成（带防频重试保护）
     ai_analysis_text = ""
     if api_key_val:
         genai.configure(api_key=api_key_val)
+        model = genai.GenerativeModel('gemini-3.6-flash')
+        
         prompt = f"""
         你是一名资深的职业美股操盘手兼新手导师。请结合宏观大盘、美债利率/恐慌情绪、阶梯阻力支撑，以及当前算法识别出的【形态雷达】状态，用通俗易懂的大白话为新手写一份诊断指南。
 
@@ -175,23 +181,24 @@ def fetch_and_analyze(ticker_input, api_key_val):
         2. 💡 **新手实操动作**：明确告诉新手目前能不能买？如果想买该挂在什么具体价位？突破阻力后下一目标看到哪里？如果在场内跌破哪个价位必须立刻止损认错？
         3. ⚠️ **核心避险警示**：结合大盘、财报倒计时或缩量/放量异动，提醒新手当前最需要防范的坑是什么？
         """
-        candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
-        for model_name in candidate_models:
+        for attempt in range(2):
             try:
-                model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
                 ai_analysis_text = response.text
                 break
             except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
+                err_msg = str(e)
+                if ("429" in err_msg or "quota" in err_msg.lower()) and attempt == 0:
+                    time.sleep(3)
                     continue
-                else:
-                    ai_analysis_text = f"诊断中断: {e}"
+                elif "429" in err_msg or "quota" in err_msg.lower():
+                    ai_analysis_text = "⏳ **AI 操盘手正在高速复盘中**：触发了调用冷却，数据已为您自动缓存，请 10 秒后刷新查看！"
                     break
-        if not ai_analysis_text:
-            ai_analysis_text = "⏳ AI 导师正在高速复盘中，触发了临时调用保护，请稍后重试！"
+                else:
+                    ai_analysis_text = f"诊断暂时中断: {err_msg}"
+                    break
 
-    # 打包所有计算结果
+    # 打包所有指标
     result_bundle = {
         "market_status": market_status,
         "vix_status_str": vix_status_str,
@@ -226,7 +233,7 @@ for i, ticker in enumerate(st.session_state.history_tickers):
 
 ticker_input = st.text_input("美股代码", value=st.session_state.selected_ticker).strip().upper()
 
-# 4. 诊断展示
+# 4. 诊断展示看板
 if st.button("开始全维度深度诊断", type="primary", use_container_width=True):
     if ticker_input and ticker_input in st.session_state.history_tickers:
         st.session_state.history_tickers.remove(ticker_input)
@@ -243,13 +250,14 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
         elif data:
             st.caption(f"⚡ 数据已智能缓存（最后刷新时间: {data['cache_time']}，5分钟内全员秒开无消耗）")
             
-            # 宏观看板
+            # 宏观风控
             if "🔴" in data['market_status']: st.error(f"**大盘风控:** {data['market_status']}")
             elif "⚠️" in data['market_status']: st.warning(f"**大盘风控:** {data['market_status']}")
             else: st.success(f"**大盘风控:** {data['market_status']}")
             
             st.info(f"🌐 **宏观全维监控：** {data['vix_status_str']} ｜ 🏛️ {data['tnx_status_str']}")
             
+            # 形态雷达
             if "💎" in data['pit_status'] or "🧱" in data['pit_status']:
                 st.success(f"🎯 **形态雷达:** {data['pit_status']}")
             else:
@@ -260,14 +268,14 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             vol_status = "🔥 放量" if data['vol_ratio'] > 1.3 else "🧊 缩量" if data['vol_ratio'] < 0.7 else "⚖️ 平量"
             col_m2.metric(label="5日量比", value=f"{data['vol_ratio']:.2f} 倍", delta=vol_status)
 
-            # Gemini AI 结果展示
+            # Gemini AI 操盘手大白话解读
             st.subheader("🤖 Gemini 操盘手大白话解读")
             if data['ai_analysis_text']:
                 st.markdown(data['ai_analysis_text'])
             else:
                 st.info("💡 请配置 Gemini API Key 以解锁 AI 操盘手建议。")
 
-            # 阶梯支撑阻力看板
+            # 阶梯支撑与动态阻力看板
             st.subheader("🛡️ 阶梯支撑与动态阻力看板")
             col1, col2 = st.columns(2)
             with col1:
