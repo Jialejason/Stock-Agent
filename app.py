@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import os
 from datetime import datetime
 from ta.trend import EMAIndicator, SMAIndicator, MACD
 from ta.momentum import RSIIndicator
@@ -11,11 +12,31 @@ st.set_page_config(page_title="投资小助手", layout="centered")
 st.title("📈 投资小助手")
 st.caption("输入美股代码，秒级诊断量价结构与 Gemini AI 保姆级大白话解读")
 
-# 展开填入 API Key
-with st.expander("🔑 点击配置 Gemini API Key（填入后即可开启 AI 解读）", expanded=False):
-    api_key_input = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
+# 获取 API Key (优先从 Secrets/环境变量读取，其次从界面输入)
+api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
-ticker_input = st.text_input("美股代码", value="NVDA").strip().upper()
+if not api_key:
+    with st.expander("🔑 配置 Gemini API Key", expanded=False):
+        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取")
+
+# 快捷选股按钮
+st.write("**🔥 热门快速自选:**")
+q_col1, q_col2, q_col3, q_col4 = st.columns(4)
+default_code = "SPCX"
+
+if "selected_ticker" not in st.session_state:
+    st.session_state.selected_ticker = default_code
+
+if q_col1.button("SPCX", use_container_width=True):
+    st.session_state.selected_ticker = "SPCX"
+if q_col2.button("NVDA", use_container_width=True):
+    st.session_state.selected_ticker = "NVDA"
+if q_col3.button("TSLA", use_container_width=True):
+    st.session_state.selected_ticker = "TSLA"
+if q_col4.button("AAPL", use_container_width=True):
+    st.session_state.selected_ticker = "AAPL"
+
+ticker_input = st.text_input("美股代码", value=st.session_state.selected_ticker).strip().upper()
 
 if st.button("开始全维度深度诊断", type="primary", use_container_width=True):
     with st.spinner(f"正在全维度诊断大盘、主力动向与 {ticker_input}..."):
@@ -96,7 +117,7 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
             vol_status = "🔥 放量" if vol_ratio > 1.3 else "🧊 缩量" if vol_ratio < 0.7 else "⚖️ 平量"
             col_m2.metric(label="5日量比", value=f"{vol_ratio:.2f} 倍", delta=vol_status)
 
-            # 抓取新闻
+            # 新闻抓取
             news_text = ""
             try:
                 news_list = ticker_obj.news
@@ -109,12 +130,10 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
 
             # 4. 🤖 Gemini AI 智能解读模块
             st.subheader("🤖 Gemini 操盘手大白话解读")
-            if api_key_input:
+            if api_key:
                 try:
-                    genai.configure(api_key=api_key_input)
+                    genai.configure(api_key=api_key)
                     model = genai.GenerativeModel('gemini-3.6-flash')
-
-
                     
                     prompt = f"""
                     你是一名资深的职业美股操盘手兼新手导师。请根据以下技术与量化数据，用最通俗易懂、接地气的大白话给完全不懂技术指标的新手写一份简明诊断指南。
@@ -138,9 +157,9 @@ if st.button("开始全维度深度诊断", type="primary", use_container_width=
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
                 except Exception as e:
-                    st.error(f"Gemini 生成失败，请检查 API Key 是否正确: {e}")
+                    st.error(f"Gemini 生成失败: {e}")
             else:
-                st.info("💡 **想要 AI 为你大白话解释？** 请在上方展开并填入你的免费 Gemini API Key 即可一键启用。")
+                st.info("💡 请填入你的 Gemini API Key 以激活 AI 解读。")
 
             # 支撑与阻力
             st.subheader("🛡️ 关键支撑与阻力位")
