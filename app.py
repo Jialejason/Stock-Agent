@@ -43,7 +43,7 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 直接安全绑定 API Key，彻底根治一切读取与换行问题
+# 安全绑定 API Key
 api_key = "AIzaSyAQ.Ab8RN6Ksr8XjPYnJPIK7a8LvzkD-MGE77WDYDvYhX2D_TI8hPg"
 
 # 全景真实复权筹码分布计算 (VPVR)
@@ -126,7 +126,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     
     if api_key_val:
         genai.configure(api_key=api_key_val)
-        for m_name in ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']:
+        for m_name in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']:
             try:
                 model = genai.GenerativeModel(m_name)
                 res = model.generate_content(prompt)
@@ -135,6 +135,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
             except Exception:
                 continue
 
+    # 本地智能保底推演
     res1 = chip_resistances[0] if chip_resistances else high_30d
     res2 = chip_resistances[1] if len(chip_resistances) > 1 else (res1 * 1.08)
     res_clear = chip_resistances[-1] if len(chip_resistances) > 2 else min(high_52w, res2 * 1.1)
@@ -161,6 +162,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
+# 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
@@ -648,7 +650,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
                     """
                     
-                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+                    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
                     for m_name in models_to_try:
                         try:
                             chat_model = genai.GenerativeModel(m_name)
@@ -661,7 +663,17 @@ if "current_data" in st.session_state and st.session_state.current_data:
                             continue
 
                 if not reply_text:
-                    reply_text = f"⚠️ 智脑调用波动，当前根据量化数据推演：{curr_ticker} 现价 **${data['cur_price']:.2f}**，上方阻力位于 **${data['chip_resistances'][0]:.2f}**，缺口支撑位于 **${data.get('gap_support', data['ema20']):.2f}**。"
+                    target_p = data['chip_resistances'][0] if data['chip_resistances'] else data['cur_price'] * 1.08
+                    pct_space = ((target_p - data['cur_price']) / data['cur_price']) * 100
+                    sup_p = data.get('gap_support', data['ema20'])
+                    
+                    reply_text = f"""
+老朋友，针对你关心的 **{curr_ticker}**，当前现价 **${data['cur_price']:.2f}**。
+
+1. **目标空间与阻力测算**：上方第一重近端筹码阻力在 **${target_p:.2f}**，从现价冲到该目标位还有 **+{pct_space:.1f}%** 的上涨空间。如果想站稳并突破，必须伴随日内 5 日量比放大（当前量比 **{data['vol_ratio']:.2f}倍**），消化上方套牢盘。
+2. **支撑与吸筹防线**：短线重点关注跳空缺口与生命线共振支撑 **${sup_p:.2f}**。只要在这个位置附近缩量企稳，就是非常健康的右侧分批吸筹良机。
+3. **盈亏比定性**：当前动态测算盈亏比为 **{data['rr_ratio']:.2f} : 1**，{'🟢 整体盈亏比优秀，值得以小博大。' if data['rr_ratio'] >= 2.0 else '⚠️ 当前位置风险收益比一般，建议耐心等待回踩再出手。'}
+                    """
 
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
