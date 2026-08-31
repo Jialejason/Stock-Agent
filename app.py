@@ -47,7 +47,7 @@ def extract_tickers_from_text(input_text):
 api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 if not api_key:
     with st.expander("🔑 配置 Gemini API Key", expanded=True):
-        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取，配置后解锁真正的大模型动态变通思考")
+        api_key = st.text_input("Gemini API Key", type="password", help="从 aistudio.google.com 获取，配置后解锁真正的大模型深度交互")
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -166,7 +166,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
-# 修复后的动态保底函数（彻底消除价格倒挂）
+# 全维动态变通保底问答引擎 (彻底消灭死板复读)
 def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_ticker_data=None):
     chips = data['chip_resistances']
     res1 = chips[0] if chips else cur_price * 1.05
@@ -192,8 +192,25 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 2. **买卖建议**：优先配置处于右侧突破形态的龙头，短线回踩优先看缺口支撑。
 """
 
-    # 1. 动态分析：“跌破缺口/回补缺口”的变通假设提问（逻辑修正：向下看更低支撑）
-    if any(k in prompt_text for k in ["跌破", "回补", "补缺口", "下探到", "破了"]):
+    # 1. 动态分析：关于“看涨空间 / 能否站回某价格（如230） / 突破目标”
+    if any(k in prompt_text for k in ["看涨", "涨到", "站回", "230", "259", "目标价", "能涨多少", "突破"]):
+        target_eval = f"**${res1:.2f}**"
+        return f"""
+关于 **{curr_ticker}（现价 ${cur_price:.2f}）能否站回及未来看涨空间推演**：
+
+1. 🎯 **第一道关键门槛：能否站稳 {target_eval}？**
+   - **核心阻力原因**：**${res1:.2f}** 是前期的日线双顶与重度套牢峰，这里的解套抛压最大。
+   - **突破条件**：必须满足**日K线放量站稳 ${res1:.2f} 且收盘不破**。只要成交量放大超过5日均量1.3倍以上，大概率能成功站回。
+2. 🚀 **站稳 {target_eval} 之后的向上空间拓展**：
+   - **第二波段目标**：**${res2:.2f}**（突破颈线后的等距加速位）；
+   - **远期理论大顶**：**${res_top:.2f}**（大级别波段极限拓展位，需配合大盘极度走牛，不可作为短线必定到达的死目标）。
+3. 💡 **操盘建议**：
+   - 现价距离 **${res1:.2f}** 仅有约 **+{((res1-cur_price)/cur_price)*100:.1f}%** 空间，**严禁在阻力位下方盲目追涨**；
+   - 正确做法是等带量突破并回踩确认站稳 **${res1:.2f}** 后顺势加仓，或者等回踩 **${sup_short:.2f}** 支撑企稳后再低吸。
+"""
+
+    # 2. 动态分析：关于“跌破缺口 / 破位应对”
+    elif any(k in prompt_text for k in ["跌破", "回补", "补缺口", "下探到", "破了"]):
         return f"""
 针对您关于 **{curr_ticker} 跌破 ${sup_short:.2f} 支撑位后的推演与应对**：
 
@@ -207,7 +224,7 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
    - 只有等股价下探至 **${ma30_p:.2f} ~ ${sup_deep:.2f}** 区间出现明确止跌阳线，才可右侧重新建仓！
 """
 
-    # 2. 捕获新闻与消息面提问
+    # 3. 捕获新闻与消息面提问
     elif any(k in prompt_text for k in ["新闻", "消息", "利多", "利空", "催化", "事件"]):
         news_summary = ""
         if data.get('news_items'):
@@ -229,16 +246,11 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 - **若利空突发下砸**：只要股价未有效跌破短线缺口/EMA20支撑 **${sup_short:.2f}** 及止损底线 **${stop_p:.2f}**，属于技术性洗盘，切忌恐慌割肉在最低点。
 """
 
-    # 3. 捕获盈亏比与是否值得买提问
+    # 4. 捕获盈亏比与是否值得买提问
     elif any(k in prompt_text for k in ["盈亏比", "值得买", "风险", "划算"]):
         up_pct = ((res1 - cur_price) / cur_price) * 100
         down_pct = ((cur_price - stop_p) / cur_price) * 100
-        
-        if rr >= 2.0:
-            verdict = f"🟢 **结论：非常划算（值得博弈）！**\n> 相当于冒着亏 **{down_pct:.1f}%** 的极小代价，去博取 **+{up_pct:.1f}%** 的反弹利润，性价比很高，适合轻仓建仓试错。"
-        else:
-            verdict = f"🔴 **结论：不划算（风险大于收益，严禁追高）！**\n> 相当于冒着可能亏 **-{down_pct:.1f}%** 的风险，只能赚到 **+{up_pct:.1f}%** 的利润（盈亏比仅 **{rr:.2f}:1**，低于2:1的黄金标准）。**新手千万别在现价追高**，耐心等回踩支撑位 **${sup_short:.2f}** 附近再考虑！"
-            
+        verdict = f"🟢 **结论：非常划算（值得博弈）！**" if rr >= 2.0 else f"🔴 **结论：不划算（风险大于收益，严禁追高）！**"
         return f"""
 关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易盈亏比大白话核验：
 
@@ -248,9 +260,8 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 
 {verdict}
 """
-
-    # 4. 常规吸筹提问
-    elif any(k in prompt_text for k in ["缺口", "216", "抄底", "吸筹", "加仓", "接盘"]):
+    # 5. 常规吸筹提问
+    elif any(k in prompt_text for k in ["吸筹", "抄底", "加仓", "接盘"]):
         return f"""
 关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的双阶梯吸筹方案：
 
@@ -260,10 +271,10 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 """
     else:
         return f"""
-基于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的交易推演：
+基于 **{curr_ticker}**（现价 **${cur_price:.2f}**）的综合交易推演：
 
 - **短线缺口支撑**：**${sup_short:.2f}** ｜ **筹码大底**：**${sup_deep:.2f}**
-- **阶梯阻力**：**${res1:.2f}** ➔ **${res2:.2f}** ➔ **${res_top:.2f}**
+- **阶梯阻力目标**：**${res1:.2f}** ➔ **${res2:.2f}** ➔ **${res_top:.2f}**
 - **防守底线**：**${stop_p:.2f}** ｜ **日内成本**：**${vwap_p:.2f}**
 """
 
@@ -555,7 +566,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
         pass
 
     top_faqs = [
-        f"📰 {ticker_input} 近期新闻消息面是利多还是利空？对股价有何具体影响？",
+        f"🚀 {ticker_input} 能否站回上方关键阻力？未来看涨空间如何？",
         f"🕳️ {ticker_input} 短线缺口支撑与筹码大底分别是多少？如何分批吸筹？",
         f"⚖️ 当前介入 {ticker_input} 的盈亏比是多少？值得冒这个风险吗？"
     ]
@@ -709,7 +720,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"自由提问（如：跌破216怎么办？回补缺口看多少？新闻有利好吗？）...")
+    user_input = st.chat_input(f"自由提问（如：能站回230吗？跌破缺口怎么看？新闻利多利空？）...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -718,7 +729,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("Gemini 大模型正在进行全维深度变通推演解答..."):
+            with st.spinner("Gemini 正在进行全维深度变通推演解答..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 compared_ticker_data = None
@@ -745,7 +756,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
                     
                     context_prompt = f"""
-                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心能力是【极度善于变通思考，能够根据用户提出的任何假设性、条件性问题（例如：跌破某点位怎么办、回补缺口怎么看、大盘崩了怎么处理）进行量身定制的动态推演】。
+                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心能力是【极度善于变通思考，能够根据用户提出的任何假设性、条件性问题（例如：能站回某点位吗、看涨到多少、跌破某点位怎么办、回补缺口怎么看）进行量身定制的动态推演】。
                     
                     【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
                     【宏观大盘】: {data['market_status']} ｜ 宏观情绪: {data['macro_sentiment_tag']}
@@ -764,11 +775,14 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     【1小时盘中挂单参考】: ${data['hourly_suggested_entry']:.2f} ｜ 止损: ${data['hourly_stop_loss']:.2f}
                     {extra_data_text}
 
-                    用户的提问是: "{prompt_to_process}"
+                    用户的具体提问是: "{prompt_to_process}"
 
                     【严格作答要求】：
-                    1. 严禁套用任何机械模版！必须直接回答用户提问中的核心关切（若用户问“跌破缺口后看多少”，必须从跌破点向下推演更低的支撑区间如MA30与筹码大底，严禁出现价格倒挂；若问“盈亏比”，直接给大白话结论）。
-                    2. 结合给出的具体数字进行逻辑推导，所有价格数字统一紧跟美元符号加粗（例如 **$216.02**）。
+                    1. 严禁套用任何机械模版！必须直接回答用户提问中的核心关切。
+                       - 若问“能不能站回某价/看涨到多少”，必须详细分析该阻力位的抛压、突破需要的放量条件，以及站稳后的第二/第三目标位；
+                       - 若问“跌破缺口后看多少”，必须从跌破点向下推演更低的支撑区间如MA30与筹码大底，严禁价格倒挂；
+                       - 若问“盈亏比”，直接给大白话结论。
+                    2. 结合给出的具体数字进行逻辑推导，所有价格数字统一紧跟美元符号加粗（例如 **$230.47**）。
                     3. 语言口吻通俗接地气，直接给散户明确的实操纪律。
                     """
                     for m_name in models_to_try:
