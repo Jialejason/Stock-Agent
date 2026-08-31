@@ -12,7 +12,7 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="投资小助手 Pro", layout="centered")
 st.title("📈 投资小助手 Pro (双向闭环量化版)")
-st.caption("⚡ 5分钟全网共享缓存 ｜ 💎 黄金坑/分批吸筹 ｜ 🚀 突破顺势加仓 ｜ 🎯 阶梯止盈清仓 ｜ ⚖️ 日内VWAP")
+st.caption("⚡ 5分钟全网共享缓存 ｜ 🧱 全景均线系统(含年线) ｜ 💎 黄金坑/分批吸筹 ｜ 🎯 阶梯止盈清仓 ｜ ⚖️ 日内VWAP")
 
 # 1. 别名映射与 Markdown 安全渲染
 TICKER_ALIASES = {
@@ -72,33 +72,34 @@ def calculate_volume_profile(df_daily, bins=25):
 def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_status_str, 
                     weekly_status, pit_status, hourly_status, vwap_price, vwap_status_desc,
                     hourly_suggested_entry, hourly_stop_loss, chip_resistances, chip_supports, 
-                    earnings_date_str, news_text, high_30d, high_52w, ema20, ma120_str, api_key_val):
+                    earnings_date_str, news_text, high_30d, high_52w, ema20, ma60_str, ma120_str, ma250_str, api_key_val):
     
     chip_res_str = " ➔ ".join([f"${p:.2f}" for p in chip_resistances]) if chip_resistances else f"${high_30d:.2f}"
     chip_sup_str = "、".join([f"${p:.2f}" for p in chip_supports]) if chip_supports else f"${hourly_suggested_entry:.2f}"
 
     prompt = f"""
     你是一名顶级实战派美股操盘手兼新手导师。核心宗旨是【大道至简、双向闭环、教小白跌时怎么买/涨时怎么卖】。
-    请基于以下全景筹码、日内平均成本(VWAP)与多周期指标，推演一份极度直白、直接给点位与执行比例的交易手册：
+    请基于以下全景筹码、日内平均成本(VWAP)、季线/半年线/年线(MA250)与多周期指标，推演一份极度直白、直接给点位与执行比例的交易手册：
 
     【股票标的】: {ticker_input} ｜ 最新价: ${cur_price:.2f}
     【宏观大盘】: {market_status} (VIX: {vix_status_str})
     【🧭 周线趋势】: {weekly_status} ｜ 【🧱 日线形态】: {pit_status}
     【⚖️ 日内持仓成本 (VWAP)】: ${vwap_price:.2f} ({vwap_status_desc})
     【🎯 1小时挂单参考】: ${hourly_suggested_entry:.2f} ｜ 止损防线: ${hourly_stop_loss:.2f}
-    【🧱 全景阶梯套牢阻力峰】: {chip_res_str} (半年线MA120: {ma120_str})
+    【大级别均线体系】: 季线(MA60): {ma60_str} ｜ 半年线(MA120): {ma120_str} ｜ 年线(MA250): {ma250_str}
+    【🧱 全景阶梯套牢阻力峰】: {chip_res_str}
     【🛡️ 主力筑底吸筹强支撑带】: {chip_sup_str}
     【历史52周大顶】: ${high_52w:.2f}
     【财报与资讯】: {earnings_date_str} ｜ {news_text if news_text else "无突发新闻"}
 
     【严格输出要求】：
     1. 所有价格数字统一规范加粗（如 **$18.44**），严禁散落星号。
-    2. 必须涵盖【跌时分批吸筹/拉低均价】与【涨时阶梯减仓/突破加仓/清仓】双向全流程。
+    2. 涵盖【跌时分批吸筹/拉低均价】与【涨时阶梯减仓/突破加仓/清仓】双向全流程。
 
     请按以下 3 个板块输出：
     1. 🚦 **多周期共振与日内定性（红绿灯）**：2句话讲清大趋势顺风逆风与日内VWAP多空态势。
     2. 💡 **跌势：小白抄底与分批吸筹指南（跌了怎么买）**：
-       - **黄金坑左侧试错位（10%~20% 底仓）**：在哪个支撑价格挂单？
+       - **黄金坑左侧试错位（10%~20% 头仓）**：在哪个支撑价格挂单？
        - **右侧企稳确认位（30% 加仓拉低均价）**：需突破哪个价格/VWAP并回踩不破才可加仓？
        - **飞刀熔断禁买线**：跌破哪个价格严禁加仓，必须立刻止损？
     3. 🎯 **涨势：阶梯止盈与突破清仓指南（涨了怎么卖）**：
@@ -161,13 +162,22 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 2. **买卖建议**：优先选择右侧站稳均线标的；处于底部的标的严格按支撑位分批低吸，不可追高。
 """
 
-    if "抄底" in prompt_text or "吸筹" in prompt_text or "接盘" in prompt_text or "建仓" in prompt_text:
+    if "年线" in prompt_text or "250" in prompt_text or "牛熊" in prompt_text:
+        ma250_val = data.get('ma250_str', '无')
+        return f"""
+关于 **{curr_ticker}** 年线（MA250: {ma250_val}）的实战意义：
+
+1. **长线牛熊分界**：年线是机构资金判定个股大牛熊的最核心界限。
+   - 股价位于年线上方时，机构资金才敢大举长期配置；
+   - 股价位于年线下方时，反弹至年线通常会遭遇极大的解套抛压。
+2. **实操建议**：若年线高于现价，冲至年线附近必须先做减仓防守；只有放量稳稳站上年线，才确立长线大牛反转。
+"""
+    elif "抄底" in prompt_text or "吸筹" in prompt_text or "接盘" in prompt_text or "建仓" in prompt_text:
         return f"""
 关于 **{curr_ticker}**（现价 **${cur_price:.2f}**）下跌时的科学抄底与吸筹方案：
 
 1. 💎 **第一阶段：左侧黄金坑轻仓试错（10%~20% 仓位）**
    - 挂单区间：**${sup_dip:.2f}** 主力筑底支撑带附近。
-   - 核心逻辑：极端缩量或超卖时埋伏，绝不满仓。
 2. 🧱 **第二阶段：右侧止跌确认加仓（30% 仓位）**
    - 触发条件：股价放量重新站稳日内成本线 VWAP **${vwap_p:.2f}**。
 3. 🛑 **禁买熔断线**：跌破 **${data['hourly_stop_loss']:.2f}** 坚决止损，严禁逆势越跌越补。
@@ -190,7 +200,7 @@ def fallback_smart_chat(prompt_text, curr_ticker, cur_price, data, compared_tick
 - **原则**：支撑位分批吸筹，阻力位分批减仓，严格遵守纪律。
 """
 
-# 2. 核心量化算法
+# 2. 核心量化算法（集成全景均线系统：MA60/MA120/MA250 + VWAP + VPVR）
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
@@ -239,9 +249,9 @@ def fetch_and_analyze(ticker_input, api_key_val):
     except Exception:
         pass
 
-    # 日线与分时数据
+    # 日线获取（抓取2年数据以确保能计算 MA250 年线）
     ticker_obj = yf.Ticker(ticker_input)
-    df_daily = yf.download(ticker_input, period="1y", interval="1d", progress=False)
+    df_daily = yf.download(ticker_input, period="2y", interval="1d", progress=False)
     if df_daily.empty:
         return None, f"未找到股票 [{ticker_input}] 的数据，请检查代码是否正确。"
     if isinstance(df_daily.columns, pd.MultiIndex):
@@ -279,14 +289,22 @@ def fetch_and_analyze(ticker_input, api_key_val):
     else:
         vwap_status_desc = "⚖️ 紧贴日内平均成本线（多空平衡）"
 
+    # 全景均线系统
     ema5 = EMAIndicator(close_d, min(5, total_days)).ema_indicator().iloc[-1]
     ema10 = EMAIndicator(close_d, min(10, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close_d, min(20, total_days)).ema_indicator().iloc[-1]
+    
     has_ma60 = total_days >= 60
     ma60 = SMAIndicator(close_d, 60).sma_indicator().iloc[-1] if has_ma60 else None
+    ma60_str = f"${ma60:.2f}" if ma60 else "上市未满60日"
+
     has_ma120 = total_days >= 120
     ma120 = SMAIndicator(close_d, 120).sma_indicator().iloc[-1] if has_ma120 else None
-    ma120_str = f"${ma120:.2f}" if ma120 else "无"
+    ma120_str = f"${ma120:.2f}" if ma120 else "上市未满120日"
+
+    has_ma250 = total_days >= 250
+    ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_ma250 else None
+    ma250_str = f"${ma250:.2f}" if ma250 else "上市未满250日"
     
     rsi_d = RSIIndicator(close_d, min(14, total_days)).rsi().iloc[-1]
     macd_diff_d = MACD(close_d).macd_diff().iloc[-1]
@@ -333,8 +351,17 @@ def fetch_and_analyze(ticker_input, api_key_val):
     if ema20 > cur_price: resistance_list.append(f"多空分水岭压制 (EMA20): ${ema20:.2f}")
     else: support_list.append(f"多空分水岭支撑 (EMA20): ${ema20:.2f}")
 
-    if ma120 and ma120 > cur_price:
-        resistance_list.append(f"半年线重要均线压制 (MA120): ${ma120:.2f}")
+    if ma60:
+        if ma60 > cur_price: resistance_list.append(f"季线重要均线压制 (MA60): ${ma60:.2f}")
+        else: support_list.append(f"季线重要均线支撑 (MA60): ${ma60:.2f}")
+
+    if ma120:
+        if ma120 > cur_price: resistance_list.append(f"半年线重要均线压制 (MA120): ${ma120:.2f}")
+        else: support_list.append(f"半年线重要均线支撑 (MA120): ${ma120:.2f}")
+
+    if ma250:
+        if ma250 > cur_price: resistance_list.append(f"年线长线牛熊压制 (MA250): ${ma250:.2f}")
+        else: support_list.append(f"年线长线牛熊支撑 (MA250): ${ma250:.2f}")
 
     for idx, cp in enumerate(chip_resistances):
         tag = "第1阶梯筹码阻力" if idx == 0 else "突破加速目标筹码峰" if idx == 1 else "历史大级别套牢顶"
@@ -435,7 +462,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
                                        tnx_status_str, weekly_status, pit_status, hourly_status, 
                                        vwap_price, vwap_status_desc, hourly_suggested_entry, 
                                        hourly_stop_loss, chip_resistances, chip_supports, 
-                                       earnings_date_str, news_text, high_30d, high_52w, ema20, ma120_str, api_key_val)
+                                       earnings_date_str, news_text, high_30d, high_52w, ema20, ma60_str, ma120_str, ma250_str, api_key_val)
 
     result_bundle = {
         "symbol": ticker_input,
@@ -453,6 +480,9 @@ def fetch_and_analyze(ticker_input, api_key_val):
         "hourly_stop_loss": hourly_stop_loss,
         "chip_resistances": chip_resistances,
         "chip_supports": chip_supports,
+        "ma60_str": ma60_str,
+        "ma120_str": ma120_str,
+        "ma250_str": ma250_str,
         "support_list": support_list,
         "resistance_list": resistance_list,
         "macd_diff_d": macd_diff_d,
@@ -488,7 +518,7 @@ if st.button("开始多周期全维共振诊断", type="primary", use_container_
         if len(st.session_state.history_tickers) > 5:
             st.session_state.history_tickers.pop()
 
-    with st.spinner(f"正在运算多周期筹码与双向买卖闭环数据 ({ticker_input})..."):
+    with st.spinner(f"正在全维运算全景均线系统与筹码闭环数据 ({ticker_input})..."):
         data, err = fetch_and_analyze(ticker_input, api_key)
         if err:
             st.error(f"❌ {err}")
@@ -524,7 +554,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.subheader("🤖 Gemini 操盘手行动指令 (双向闭环买卖手册)")
     safe_render_markdown(data['ai_analysis_text'])
 
-    st.subheader("🛡️ 阶梯支撑与动态阻力看板 (含全景筹码峰与半年线)")
+    st.subheader("🛡️ 阶梯支撑与动态阻力看板 (含季线/半年线/年线MA250)")
     col1, col2 = st.columns(2)
     with col1:
         st.info("**【🟢 抄底/吸筹/拉低均价支撑带】**\n\n" + "\n\n".join(data['support_list']))
@@ -537,10 +567,10 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（双向买卖推演版）
+    # 5. 专属 AI 操盘助理（全景均线与闭环版）
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
-    st.caption(f"💡 AI 已深度挂载 {curr_ticker} 的黄金坑吸筹带、全景筹码阻力与日内持仓成本(VWAP)。")
+    st.caption(f"💡 AI 已深度挂载 {curr_ticker} 的全景均线系统（含年线MA250）、全景筹码分布与日内持仓成本(VWAP)。")
 
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
@@ -556,7 +586,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input(f"问问关于 {curr_ticker}（如黄金坑吸筹位、阶梯止盈点）或对比其他股票...")
+    user_input = st.chat_input(f"问问关于 {curr_ticker}（如年线位置、黄金坑吸筹位、阶梯止盈点）或对比其他股票...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -565,7 +595,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("AI 操盘手正在针对双向买卖闭环深度推演解答..."):
+            with st.spinner("AI 操盘手正在针对全景均线与双向买卖闭环深度推演解答..."):
                 reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 compared_ticker_data = None
@@ -590,12 +620,13 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
                     
                     context_prompt = f"""
-                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心优势是【能够针对用户的具体买卖疑惑，结合黄金坑吸筹位、全景阶梯阻力与VWAP给出精确执行策略】。
+                    你是一名顶级的资深美股操盘手与量化交易导师。你的核心优势是【能够针对用户的具体买卖疑惑，结合年线MA250、季线/半年线、黄金坑吸筹位、全景阶梯阻力与VWAP给出精确执行策略】。
                     
                     【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
                     【宏观大盘】: {data['market_status']}
                     【日内持仓成本线 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
                     【周线大趋势】: {data['weekly_status']} ｜ 日线形态: {data['pit_status']}
+                    【均线体系】: 季线(MA60): {data.get('ma60_str', '无')} ｜ 半年线(MA120): {data.get('ma120_str', '无')} ｜ 年线(MA250): {data.get('ma250_str', '无')}
                     【全景密集筹码阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
                     【主力吸筹支撑带】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
                     【动态阻力与目标看板】: {'; '.join(data['resistance_list'])}
@@ -606,7 +637,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     用户的具体提问是: "{prompt_to_process}"
 
                     【严格作答要求】：
-                    1. 严禁使用笼统模版！直接针对用户的问题作答（若问抄底/吸筹/拉低均价，给出左侧头仓与右侧确认点位；若问止盈/清仓，给出具体减仓与清仓价格）。
+                    1. 严禁使用笼统模版！直接针对用户的问题作答（涉及年线/季线/半年线结合大资金机构思维；涉及吸筹/止盈给出具体点位与比例）。
                     2. 所有价格数字必须紧跟美元符号规范加粗（例如 **$18.40**）。
                     3. 直接给点位、比例与执行动作，语言精炼直白。
                     """
