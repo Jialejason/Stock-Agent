@@ -43,7 +43,7 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 直接硬编码绑定，彻底避开 Streamlit Secrets 的换行烦恼
+# 直接硬编码绑定 API Key，一步到位解决所有环境读取与换行问题
 api_key = "AIzaSyAQ.Ab8RN6Ksr8XjPYnJPIK7a8LvzkD-MGE77WDYDvYhX2D_TI8hPg"
 api_key = raw_api_key.strip().replace("\n", "").replace("\r", "")
 
