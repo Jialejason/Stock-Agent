@@ -9,11 +9,15 @@ st.set_page_config(page_title="投资小助手", layout="centered")
 st.title("📈 投资小助手")
 st.caption("输入美股代码，秒级诊断量价关系并生成战术点位")
 
-ticker = st.text_input("美股代码", value="SPCX").strip().upper()
+# 快捷标签选择
+quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+default_ticker = "SPCX"
+
+ticker_input = st.text_input("美股代码", value=default_ticker).strip().upper()
 
 if st.button("开始分析", type="primary", use_container_width=True):
-    with st.spinner(f"正在全维度诊断 {ticker}..."):
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+    with st.spinner(f"正在全维度诊断 {ticker_input}..."):
+        df = yf.download(ticker_input, period="1y", interval="1d", progress=False)
         if df.empty:
             st.error("❌ 未找到股票数据，请检查代码。")
         else:
@@ -52,34 +56,41 @@ if st.button("开始分析", type="primary", use_container_width=True):
             recent_high = high.iloc[-min(30, total_days):].max()
             recent_low = low.iloc[-min(30, total_days):].min()
             
-            # 顶部仪表盘
+            # 顶部数据
             col_m1, col_m2 = st.columns(2)
-            col_m1.metric(label=f"{ticker} 最新价", value=f"${cur_price:.2f}")
+            col_m1.metric(label=f"{ticker_input} 最新价", value=f"${cur_price:.2f}")
             vol_status = "🔥 放量" if vol_ratio > 1.3 else "🧊 缩量" if vol_ratio < 0.7 else "⚖️ 平量"
             col_m2.metric(label="5日量比", value=f"{vol_ratio:.2f} 倍", delta=vol_status)
             
-            # 战术策略卡片
+            # 战术策略卡片 (优化更精准的紧凑止损点)
             st.subheader("🎯 实战操作指南 (新手参考)")
-            if cur_price > ema20 and macd_diff > 0 and rsi < 65:
-                tactic_title = "🟢 趋势良好，适合分批逢低吸纳"
-                tactic_color = "success"
-            elif cur_price > ema20 and rsi >= 65:
-                tactic_title = "⚠️ 处于高位强势区，切勿追高，防范短线震荡"
-                tactic_color = "warning"
-            else:
-                tactic_title = "❄️ 处于调整/震荡区间，控制仓位或观望"
-                tactic_color = "info"
-            
             rec_entry = f"${ema20:.2f} ~ ${ema10:.2f}"
-            rec_stop = f"${max(ema20 - atr, recent_low):.2f}"
+            rec_stop = f"${(ema20 - (atr * 0.4)):.2f}"  # 紧凑防守线，避免深套
             rec_target = f"${recent_high:.2f}"
             
-            if tactic_color == "success":
-                st.success(f"**策略定性:** {tactic_title}\n\n- **建议关注回踩区间:** `{rec_entry}`\n- **参考防守止损位:** `{rec_stop}`\n- **上方第一止盈目标:** `{rec_target}`")
-            elif tactic_color == "warning":
-                st.warning(f"**策略定性:** {tactic_title}\n\n- **建议关注回踩区间:** `{rec_entry}`\n- **参考防守止损位:** `{rec_stop}`\n- **上方第一阻力目标:** `{rec_target}`")
+            if cur_price > ema20 and macd_diff > 0 and rsi < 65:
+                st.success(
+                    f"**策略定性:** 🟢 趋势良好，适合分批逢低吸纳\n\n"
+                    f"- **建议关注回踩区间:** `{rec_entry}`\n"
+                    f"- **参考防守止损位:** `{rec_stop}` (跌破减仓规避风险)\n"
+                    f"- **上方第一止盈目标:** `{rec_target}`\n"
+                    f"- **仓位执行建议:** 建议采取分批建仓（底仓 3 成，回踩均线企稳再补 2 成）"
+                )
+            elif cur_price > ema20 and rsi >= 65:
+                st.warning(
+                    f"**策略定性:** ⚠️ 处于高位强势区，切勿追高，防范短线震荡\n\n"
+                    f"- **建议关注回踩区间:** `{rec_entry}`\n"
+                    f"- **参考防守止损位:** `{rec_stop}`\n"
+                    f"- **上方第一阻力目标:** `{rec_target}`\n"
+                    f"- **仓位执行建议:** 严禁追高，持股者可逐步梯级止盈"
+                )
             else:
-                st.info(f"**策略定性:** {tactic_title}\n\n- **建议观望支撑:** `{ema20:.2f}`\n- **强支撑防线:** `{recent_low:.2f}`")
+                st.info(
+                    f"**策略定性:** ❄️ 处于调整/震荡区间，控制仓位或观望\n\n"
+                    f"- **建议观望支撑:** `${ema20:.2f}`\n"
+                    f"- **强支撑防线:** `${recent_low:.2f}`\n"
+                    f"- **仓位执行建议:** 趋势未明前以轻仓或空仓观察为主"
+                )
 
             # 支撑与阻力
             st.subheader("🛡️ 关键支撑与阻力位")
@@ -99,7 +110,7 @@ if st.button("开始分析", type="primary", use_container_width=True):
             with col1: st.info("\n\n".join(supports))
             with col2: st.warning("\n\n".join(resistances))
             
-            # 动能与技术特征
+            # 动能与量价特征
             st.subheader("⚡ 动能与量价特征")
             macd_str = "🟢 多头金叉（动能充沛）" if macd_val > macd_signal and macd_diff > 0 else "🔴 动能减弱/死叉休整"
             st.write(f"- **MACD 状态:** `{macd_str}` (柱值: {macd_diff:.2f})")
@@ -114,3 +125,4 @@ if st.button("开始分析", type="primary", use_container_width=True):
             else: vol_desc = "🧊 缩量调整/蓄势洗盘"
             st.write(f"- **量价形态:** `{vol_desc}`")
             st.write(f"- **日均真实波幅 (ATR):** `${atr:.2f}` (单日平均波动参考)")
+    
