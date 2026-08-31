@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import time
 import re
 from ta.trend import EMAIndicator, SMAIndicator, MACD
@@ -226,7 +226,13 @@ def fetch_and_analyze(ticker_input, api_key_val):
     suggested_faqs.append(f"💰 我资金量较小，针对 {ticker_input} 怎么执行科学仓位管理？")
     top_faqs = suggested_faqs[:3]
 
-    # F. Gemini 3.6 生成（增强排版规范与逻辑分层）
+    # F. 双时区时间戳换算 (本地 UTC+8 与 美东 ET)
+    now_utc = datetime.now(timezone.utc)
+    local_time_str = (now_utc + timedelta(hours=8)).strftime("%H:%M:%S")
+    et_time_str = (now_utc - timedelta(hours=4)).strftime("%H:%M:%S") # 夏令时美东 UTC-4
+    cache_display_time = f"{local_time_str} 本地 ｜ {et_time_str} 美东"
+
+    # G. Gemini AI 生成与自愈逻辑 (核心防假死重构)
     ai_analysis_text = ""
     if api_key_val:
         genai.configure(api_key=api_key_val)
@@ -250,7 +256,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
         {news_text if news_text else "暂无突发新闻"}
 
         【排版与逻辑严格要求】：
-        1. 严禁出现孤立星号、错位空格或破坏 Markdown 的符号（如禁止出现 18.44 * 或 ** 17.59 这种断裂）。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
+        1. 严禁出现断裂的星号或错位格式（禁止出现 18.44 * 或 ** 17.59 这种断裂）。所有价格数字必须紧跟美元符号规范加粗，例如 **$18.44**。
         2. 若定性为【不可买/保持空仓】，请严格分为【观望者等待的右侧条件】与【若触发买入后的止盈止损规划】，避免小白产生逻辑困惑。
         3. 直接给数字和执行动作，严禁模棱两可。
 
@@ -262,22 +268,23 @@ def fetch_and_analyze(ticker_input, api_key_val):
            - **铁血止损底线**：一旦介入后，跌破哪个精确价格必须无条件止损离场？
         3. ⚠️ **最核心的一个避险坑**：一句话点透当前最大的单一风险。
         """
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 response = model.generate_content(prompt)
-                ai_analysis_text = response.text
-                break
+                if response and response.text:
+                    ai_analysis_text = response.text
+                    break
             except Exception as e:
-                err_msg = str(e)
-                if ("429" in err_msg or "quota" in err_msg.lower()) and attempt == 0:
-                    time.sleep(3)
+                err_msg = str(e).lower()
+                if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
+                    time.sleep(2 * (attempt + 1))
                     continue
-                elif "429" in err_msg or "quota" in err_msg.lower():
-                    ai_analysis_text = "⏳ **AI 操盘手正在复盘全网数据**：触发了临时调用冷却，数据已为您自动缓存，请 10 秒后刷新查看！"
-                    break
                 else:
-                    ai_analysis_text = f"诊断暂时中断: {err_msg}"
                     break
+
+        # 核心防假死：如果 3 次重试后仍限流，绝不缓存错误，直接抛出异常让 Streamlit 稍后自动重连
+        if not ai_analysis_text:
+            raise Exception("API_RATE_LIMIT")
 
     result_bundle = {
         "market_status": market_status,
@@ -297,16 +304,16 @@ def fetch_and_analyze(ticker_input, api_key_val):
         "atr_d": atr_d,
         "top_faqs": top_faqs,
         "ai_analysis_text": ai_analysis_text,
-        "cache_time": datetime.now().strftime("%H:%M:%S")
+        "cache_display_time": cache_display_time
     }
     return result_bundle, None
 
 # 3. 快速自选栏
 if "history_tickers" not in st.session_state:
-    st.session_state.history_tickers = ["SPCX", "NVDA", "TSLA", "AAPL"]
+    st.session_state.history_tickers = ["USAR", "NVDA", "TSLA", "AAPL"]
 
 if "selected_ticker" not in st.session_state:
-    st.session_state.selected_ticker = "SPCX"
+    st.session_state.selected_ticker = "USAR"
 
 st.write("**🔥 快速自选与最近查询:**")
 cols = st.columns(len(st.session_state.history_tickers))
@@ -326,20 +333,26 @@ if st.button("开始多周期全维共振诊断", type="primary", use_container_
             st.session_state.history_tickers.pop()
 
     with st.spinner(f"正在全维运算周线/日线/1小时共振数据 ({ticker_input})..."):
-        data, err = fetch_and_analyze(ticker_input, api_key)
-        if err:
-            st.error(f"❌ {err}")
-        else:
-            st.session_state.current_data = data
-            st.session_state.current_ticker = ticker_input
-            st.session_state.chat_history = []
+        try:
+            data, err = fetch_and_analyze(ticker_input, api_key)
+            if err:
+                st.error(f"❌ {err}")
+            else:
+                st.session_state.current_data = data
+                st.session_state.current_ticker = ticker_input
+                st.session_state.chat_history = []
+        except Exception as e:
+            if "API_RATE_LIMIT" in str(e):
+                st.warning("⏳ **AI 操盘手正在复盘全网数据**：触发了免费 API 临时频率限制，请等待 5~10 秒后再次点击上方按钮！")
+            else:
+                st.error(f"诊断遇到问题: {e}")
 
 # 渲染分析面板
 if "current_data" in st.session_state and st.session_state.current_data:
     data = st.session_state.current_data
     curr_ticker = st.session_state.get("current_ticker", ticker_input)
     
-    st.caption(f"⚡ 数据已智能缓存（最后刷新时间: {data['cache_time']}，5分钟内全员秒开无消耗）")
+    st.caption(f"⚡ 数据已智能缓存（刷新时间: {data['cache_display_time']} ｜ 5分钟内全员秒开无消耗）")
     
     # 宏观大盘风控
     if "🔴" in data['market_status']: st.error(f"**大盘风控:** {data['market_status']}")
@@ -423,13 +436,16 @@ if "current_data" in st.session_state and st.session_state.current_data:
                     
                     for sym in set(words):
                         if sym != curr_ticker:
-                            other_data, _ = fetch_and_analyze(sym, api_key)
-                            if other_data:
-                                extra_data_text += f"""
-                                【提及标的 {sym} 最新量化数据】:
-                                现价: ${other_data['cur_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
-                                关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
-                                """
+                            try:
+                                other_data, _ = fetch_and_analyze(sym, api_key)
+                                if other_data:
+                                    extra_data_text += f"""
+                                    【提及标的 {sym} 最新量化数据】:
+                                    现价: ${other_data['cur_price']:.2f}, 周线趋势: {other_data['weekly_status']}, 日线形态: {other_data['pit_status']}
+                                    关键阻力: {'; '.join(other_data['resistance_list'][:2])}, 关键支撑: {'; '.join(other_data['support_list'][:2])}
+                                    """
+                            except Exception:
+                                pass
 
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼新手导师，秉承【大道至简】的教学风格。
