@@ -43,7 +43,7 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 获取并清洗 API Key（自动过滤换行符与多余空格，完美兼容 AQ. 令牌）
+# 获取并清洗 API Key
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = raw_api_key.strip().replace("\n", "").replace("\r", "")
 
@@ -579,7 +579,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
     st.write(f"- **RSI (14):** `{data['rsi_d']:.2f}` ({'⚠️ 超买' if data['rsi_d'] > 70 else '💎 极端超卖/黄金坑区' if data['rsi_d'] < 38 else '⚖️ 中性'})")
     st.write(f"- **日均真实波幅 (ATR):** `${data['atr_d']:.2f}`")
 
-    # 5. 专属 AI 操盘助理（自动清洗并直连智脑版）
+    # 5. 专属 AI 操盘助理
     st.divider()
     st.subheader("💬 对当前诊断有疑问？随时追问 AI 助理")
     st.caption(f"💡 真正挂载 Gemini 智脑，支持数学空间计算、条件假设推演、个股对比与策略变通。")
@@ -627,7 +627,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
                 if api_key:
                     genai.configure(api_key=api_key)
-                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]] if data['news_items'] else "无突发新闻"
+                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
                     
                     context_prompt = f"""
                     你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
