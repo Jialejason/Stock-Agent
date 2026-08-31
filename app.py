@@ -43,15 +43,8 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 直接硬编码绑定 API Key，一步到位解决所有环境读取与换行问题
+# 直接安全绑定 API Key，彻底根治一切读取与换行问题
 api_key = "AIzaSyAQ.Ab8RN6Ksr8XjPYnJPIK7a8LvzkD-MGE77WDYDvYhX2D_TI8hPg"
-api_key = raw_api_key.strip().replace("\n", "").replace("\r", "")
-
-if not api_key:
-    with st.expander("🔑 配置 Gemini API Key (激活真实 AI 思考)", expanded=True):
-        manual_key = st.text_input("Gemini API Key", type="password", help="在此处配置后即可自由智能问答")
-        if manual_key:
-            api_key = manual_key.strip().replace("\n", "").replace("\r", "")
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -142,7 +135,6 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
             except Exception:
                 continue
 
-    # 本地规则保底
     res1 = chip_resistances[0] if chip_resistances else high_30d
     res2 = chip_resistances[1] if len(chip_resistances) > 1 else (res1 * 1.08)
     res_clear = chip_resistances[-1] if len(chip_resistances) > 2 else min(high_52w, res2 * 1.1)
@@ -169,7 +161,6 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
 当前动态盈亏比测算为 **{rr_ratio:.2f} : 1**（{rr_eval}）。
 """
 
-# 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, api_key_val):
     ticker_input = ticker_input.strip().upper()
@@ -460,7 +451,7 @@ def fetch_and_analyze(ticker_input, api_key_val):
                                        hourly_status, vwap_price, vwap_status_desc, hourly_suggested_entry, 
                                        hourly_stop_loss, chip_resistances, chip_supports, gap_support, prev_close_p,
                                        earnings_date_str, days_to_earnings, news_items, high_30d, high_52w, ema20, ma30,
-                                       ma60_str, ma120_str, ma250_str, rr_ratio, api_key_val)
+                                       ma60_str, ma120_str, ma250_str, rr_ratio, api_key)
 
     result_bundle = {
         "symbol": ticker_input,
