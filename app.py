@@ -45,7 +45,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置与最新 Gemini 模型适配引擎
+# 1. 基础配置与自适应 ListModels 智脑通信引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -91,14 +91,7 @@ def send_pushover_alert(message, title="🛡️ 美股投顾量化预警", prior
 def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
-    
-    # 官方要求的最新标准模型队列
-    models = [
-        "gemini-3.6-flash",
-        "gemini-3-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-latest"
-    ]
+
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key
@@ -109,8 +102,38 @@ def call_gemini_smart(prompt_text):
         }]
     }
 
+    # 1. 动态获取当前 API Key 真实支持的模型列表
+    usable_models = []
+    try:
+        list_url = "https://generativelanguage.googleapis.com/v1beta/models"
+        resp_list = requests.get(list_url, headers=headers, timeout=10)
+        if resp_list.status_code == 200:
+            all_models = resp_list.json().get("models", [])
+            for item in all_models:
+                m_name = item.get("name", "")  # 格式如 "models/gemini-..."
+                methods = item.get("supportedGenerationMethods", [])
+                if "generateContent" in methods:
+                    # 剥离 "models/" 前缀
+                    clean_name = m_name.replace("models/", "")
+                    usable_models.append(clean_name)
+    except Exception:
+        pass
+
+    # 若动态拉取失败，启用兜底队列
+    if not usable_models:
+        usable_models = [
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-002",
+            "gemini-1.5-flash-001",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-002"
+        ]
+
+    # 2. 依次调用可用模型
     last_error = ""
-    for m in models:
+    for m in usable_models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
             resp = requests.post(url, headers=headers, json=payload, timeout=25)
