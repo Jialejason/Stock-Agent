@@ -43,9 +43,43 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 动态安全获取 API Key（不再硬编码）
+# 动态安全获取 API Key
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+
+# 通用智能调用 Gemini 函数（自动动态寻找可用模型）
+def call_gemini_smart(prompt_text):
+    if not api_key:
+        return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
+    
+    try:
+        genai.configure(api_key=api_key)
+        
+        # 1. 优先尝试最常用的活跃模型
+        candidate_models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-pro-latest']
+        for m_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(m_name)
+                res = model.generate_content(prompt_text)
+                if res and res.text:
+                    return res.text
+            except Exception:
+                continue
+
+        # 2. 如果上面的候选名称变动，自动列出该账号下所有支持 generateContent 的可用模型
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                try:
+                    model = genai.GenerativeModel(m.name)
+                    res = model.generate_content(prompt_text)
+                    if res and res.text:
+                        return res.text
+                except Exception:
+                    continue
+
+        return "⚠️ 当前 API Key 暂无可用的 Gemini 生成模型，请确认 Google AI Studio 权限。"
+    except Exception as e:
+        return f"⚠️ 智脑调用异常: `{e}`"
 
 # 全景真实复权筹码分布计算 (VPVR)
 def calculate_volume_profile(df_daily, bins=25):
@@ -125,18 +159,7 @@ def get_ai_analysis(ticker_input, cur_price, market_status, vix_status_str, tnx_
     4. ⚖️ **交易质量与盈亏比核验**：直接给结论（划算/不划算），用生活化语言讲透为什么。
     """
     
-    if api_key:
-        genai.configure(api_key=api_key)
-        for m_name in ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']:
-            try:
-                model = genai.GenerativeModel(m_name)
-                res = model.generate_content(prompt)
-                if res and res.text:
-                    return res.text
-            except Exception as e:
-                return f"⚠️ 智脑调用异常: `{e}`。请确认你的 Gemini API Key 是否有效并在新项目中创建。"
-
-    return "⚠️ 未检测到有效的 Gemini API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
+    return call_gemini_smart(prompt)
 
 # 2. 核心量化算法
 @st.cache_data(ttl=300, show_spinner=False)
@@ -204,7 +227,6 @@ def fetch_and_analyze(ticker_input):
         df_daily.columns = df_daily.columns.get_level_values(0)
     
     close_d = df_daily['Close'].dropna()
-    open_d = df_daily['Open'].dropna()
     high_d = df_daily['High'].dropna()
     low_d = df_daily['Low'].dropna()
     vol_d = df_daily['Volume'].dropna()
@@ -252,8 +274,8 @@ def fetch_and_analyze(ticker_input):
     ma120 = SMAIndicator(close_d, 120).sma_indicator().iloc[-1] if has_ma120 else None
     ma120_str = f"${ma120:.2f}" if ma120 else "上市未满120日"
 
-    has_has250 = total_days >= 250
-    ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_has250 else None
+    has_ma250 = total_days >= 250
+    ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_ma250 else None
     ma250_str = f"${ma250:.2f}" if ma250 else "上市未满250日"
     
     gap_support = None
@@ -594,7 +616,6 @@ if "current_data" in st.session_state and st.session_state.current_data:
 
         with st.chat_message("assistant"):
             with st.spinner("Gemini 正在深度思考并计算推演中..."):
-                reply_text = ""
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 extra_data_text = ""
                 
@@ -611,51 +632,36 @@ if "current_data" in st.session_state and st.session_state.current_data:
                         except Exception:
                             pass
 
-                if api_key:
-                    genai.configure(api_key=api_key)
-                    news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
-                    
-                    context_prompt = f"""
-                    你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
-                    
-                    【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
-                    【宏观环境】: {data['market_status']} ｜ 情绪: {data['macro_sentiment_tag']}
-                    【实时资讯】:
-                    {news_brief}
-                    【日内成本 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
-                    【均线体系】: EMA20: ${data.get('ema20', 0):.2f} ｜ MA30: ${data.get('ma30', 0):.2f} ｜ MA60: {data.get('ma60_str', '无')} ｜ MA250: {data.get('ma250_str', '无')}
-                    【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘: ${data.get('prev_close_p', data['cur_price']):.2f})
-                    【波段筹码大底】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
-                    【全景密集阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
-                    【1小时参考买点】: ${data['hourly_suggested_entry']:.2f} ｜ 止损防线: ${data['hourly_stop_loss']:.2f}
-                    【动态盈亏比】: {data['rr_ratio']:.2f} : 1
-                    {extra_data_text}
+                news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无突发新闻"
+                
+                context_prompt = f"""
+                你是一名顶级的资深美股操盘手兼量化导师。你拥有极其强大、聪颖、灵活的自然语言理解与变通推演能力。
+                
+                【当前标的】: {curr_ticker} ｜ 现价: ${data['cur_price']:.2f}
+                【宏观环境】: {data['market_status']} ｜ 情绪: {data['macro_sentiment_tag']}
+                【实时资讯】:
+                {news_brief}
+                【日内成本 (VWAP)】: ${data['vwap_price']:.2f} ({data['vwap_status_desc']})
+                【均线体系】: EMA20: ${data.get('ema20', 0):.2f} ｜ MA30: ${data.get('ma30', 0):.2f} ｜ MA60: {data.get('ma60_str', '无')} ｜ MA250: {data.get('ma250_str', '无')}
+                【短线跳空缺口/EMA20支撑】: ${data.get('gap_support', data['ema20']):.2f} (昨收盘: ${data.get('prev_close_p', data['cur_price']):.2f})
+                【波段筹码大底】: {', '.join([f'${p:.2f}' for p in data['chip_supports']])}
+                【全景密集阻力阶梯】: {' ➔ '.join([f'${p:.2f}' for p in data['chip_resistances']])}
+                【1小时参考买点】: ${data['hourly_suggested_entry']:.2f} ｜ 止损防线: ${data['hourly_stop_loss']:.2f}
+                【动态盈亏比】: {data['rr_ratio']:.2f} : 1
+                {extra_data_text}
 
-                    用户的真实提问是: "{prompt_to_process}"
+                用户的真实提问是: "{prompt_to_process}"
 
-                    【严格执行规则】：
-                    1. 严禁使用任何机械模版！彻底根据用户的具体提问进行针对性解答：
-                       - 如果用户问“到某个价格有多少% / 空间多少”，请直接进行精确数学计算并给出百分比，同时点评突破难度；
-                       - 如果用户问“能不能站回某价”，请分析上方的套牢盘抛压、突破所需的放量条件与确认动作；
-                       - 如果用户问“跌破某支撑怎么办”，请从跌破价格向下推演更低的接力支撑与止损纪律；
-                       - 如果用户问“盈亏比”，用大白话直接给结论（划算/不划算）。
-                    2. 所有涉及的价格数字统一紧跟美元符号加粗（如 **$230.47**，**+4.9%**）。
-                    3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
-                    """
-                    
-                    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-                    for m_name in models_to_try:
-                        try:
-                            chat_model = genai.GenerativeModel(m_name)
-                            chat_resp = chat_model.generate_content(context_prompt)
-                            if chat_resp and chat_resp.text:
-                                reply_text = chat_resp.text
-                                break
-                        except Exception as e:
-                            reply_text = f"❌ 智脑连通失败: `{e}`。请检查 API Key 是否有效。"
-                            continue
-                else:
-                    reply_text = "⚠️ 未检测到 API Key，请在 Streamlit 后台配置 Secrets。"
-
+                【严格执行规则】：
+                1. 严禁使用任何机械模版！彻底根据用户的具体提问进行针对性解答：
+                   - 如果用户问“到某个价格有多少% / 空间多少”，请直接进行精确数学计算并给出百分比，同时点评突破难度；
+                   - 如果用户问“能不能站回某价”，请分析上方的套牢盘抛压、突破所需的放量条件与确认动作；
+                   - 如果用户问“跌破某支撑怎么办”，请从跌破价格向下推演更低的接力支撑与止损纪律；
+                   - 如果用户问“盈亏比”，用大白话直接给结论（划算/不划算）。
+                2. 所有涉及的价格数字统一紧跟美元符号加粗（如 **$230.47**，**+4.9%**）。
+                3. 说话口吻要像一个顶级资深操盘手老朋友，直接给结论和干货，通俗犀利。
+                """
+                
+                reply_text = call_gemini_smart(context_prompt)
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
