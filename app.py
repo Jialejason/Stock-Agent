@@ -9,11 +9,11 @@ from ta.momentum import RSIIndicator
 from ta.volatility import AverageTrueRange
 import google.generativeai as genai
 
-st.set_page_config(page_title="投资小助手 Pro 机构量化版", layout="centered")
-st.title("📈 投资小助手 Pro (机构量化微观版)")
-st.caption("⚡ 5分钟全网缓存 ｜ 🧠 Gemini 机构级智脑 ｜ 📊 VPVR筹码区(POC/VAH/VAL) ｜ 🎯 期权痛点/PCR ｜ 🛡️ ATR动态风控")
+st.set_page_config(page_title="投资小助手 Pro (全维实战旗舰版)", layout="centered")
+st.title("📈 投资小助手 Pro (全维分层旗舰版)")
+st.caption("⚡ 5分钟智能缓存 ｜ 🚦 3秒大白话决策 ｜ 🌐 大盘指数联动 ｜ 🧱 经典均线+微观筹码 ｜ 🛡️ 机构风控")
 
-# 1. 基础别名映射与 Markdown 安全渲染
+# 1. 基础工具与 Markdown 安全渲染
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
     "APPLE": "AAPL", "苹果": "AAPL",
@@ -76,7 +76,7 @@ def call_gemini_smart(prompt_text):
     except Exception as e:
         return f"⚠️ 智脑调用异常: `{e}`"
 
-# 2. 机构级微观结构计算模块 (Volume Profile & Options)
+# 2. 机构级微观结构计算 (Volume Profile & Options)
 def calculate_institutional_volume_profile(df_daily, bins=40):
     if df_daily.empty or 'Close' not in df_daily.columns or 'Volume' not in df_daily.columns:
         return {"poc": 0.0, "vah": 0.0, "val": 0.0, "supports": [], "resistances": []}
@@ -133,7 +133,6 @@ def fetch_options_microstructure(ticker_obj, cur_price):
         if not expirations:
             return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
 
-        # 抓取最近一个到期日期权链
         opt_chain = ticker_obj.option_chain(expirations[0])
         calls = opt_chain.calls
         puts = opt_chain.puts
@@ -142,11 +141,9 @@ def fetch_options_microstructure(ticker_obj, cur_price):
         total_put_oi = puts['openInterest'].fillna(0).sum()
         pcr = float(total_put_oi / total_call_oi) if total_call_oi > 0 else 1.0
 
-        # 期权持仓墙 (OI Walls)
         call_wall = float(calls.loc[calls['openInterest'].idxmax()]['strike']) if not calls.empty and calls['openInterest'].sum() > 0 else 0.0
         put_wall = float(puts.loc[puts['openInterest'].idxmax()]['strike']) if not puts.empty and puts['openInterest'].sum() > 0 else 0.0
 
-        # 计算 Max Pain (最大痛点)
         strikes = sorted(list(set(calls['strike'].tolist() + puts['strike'].tolist())))
         loss_dict = {}
         for s in strikes:
@@ -164,15 +161,18 @@ def fetch_options_microstructure(ticker_obj, cur_price):
     except Exception:
         return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
 
-# 3. 核心量化算法
+# 3. 核心量化算法与数据提取
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input):
     ticker_input = ticker_input.strip().upper()
     
+    # 大盘宏观数据抓取
     macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
     macro_data = yf.download(macro_tickers, period="3mo", interval="1d", auto_adjust=True, progress=False)
     
-    market_status = "🟢 多头顺风：标普与纳指均处于健康上升通道。"
+    market_status = "🟢 多头顺风：标普(SPY) 与 纳指(QQQ) 均稳居生命线上方。"
+    spy_info_str = "SPY: 正常"
+    qqq_info_str = "QQQ: 正常"
     vix_status_str = "正常"
     tnx_status_str = "正常"
     macro_sentiment_tag = "🟢 情绪向好"
@@ -182,28 +182,36 @@ def fetch_and_analyze(ticker_input):
             close_data = macro_data['Close']
             spy_c = close_data['SPY'].dropna()
             spy_close = spy_c.iloc[-1]
+            spy_prev = spy_c.iloc[-2] if len(spy_c) >= 2 else spy_close
+            spy_chg = (spy_close - spy_prev) / spy_prev
             spy_ema20 = EMAIndicator(spy_c, 20).ema_indicator().iloc[-1]
+            spy_info_str = f"SPY: ${spy_close:.2f} ({spy_chg*100:+.2f}%)"
             
             qqq_c = close_data['QQQ'].dropna()
             qqq_close = qqq_c.iloc[-1]
+            qqq_prev = qqq_c.iloc[-2] if len(qqq_c) >= 2 else qqq_close
+            qqq_chg = (qqq_close - qqq_prev) / qqq_prev
             qqq_ema20 = EMAIndicator(qqq_c, 20).ema_indicator().iloc[-1]
+            qqq_info_str = f"QQQ: ${qqq_close:.2f} ({qqq_chg*100:+.2f}%)"
             
             vix_close = close_data['^VIX'].dropna().iloc[-1]
-            vix_status_str = f"⚠️ 恐慌升温 (VIX={vix_close:.2f})" if vix_close > 22 else f"🟢 平稳 (VIX={vix_close:.2f})"
+            vix_status_str = f"⚠️ 恐慌高企 (VIX={vix_close:.2f})" if vix_close > 22 else f"🟢 恐慌平稳 (VIX={vix_close:.2f})"
             tnx_close = close_data['^TNX'].dropna().iloc[-1]
-            tnx_status_str = f"10Y美债: {tnx_close:.2f}%"
+            tnx_status_str = f"10Y美债收益率: {tnx_close:.2f}%"
 
             if vix_close >= 25:
-                macro_sentiment_tag = "🔴 极端避险"
+                macro_sentiment_tag = "🔴 极端恐慌避险"
             elif vix_close <= 15:
-                macro_sentiment_tag = "🔥 极度贪婪"
+                macro_sentiment_tag = "🔥 极度贪婪活跃"
             else:
-                macro_sentiment_tag = "🟢 结构平衡"
+                macro_sentiment_tag = "🟢 平稳健康"
 
             if (spy_close < spy_ema20 and qqq_close < qqq_ema20) or vix_close >= 25:
-                market_status = "🔴 极度预警：SPY 与 QQQ 双双跌破 EMA20 生命线，机构防御避险！"
-            elif spy_close < spy_ema20 or qqq_close < qqq_ema20:
-                market_status = "⚠️ 结构分化：核心大盘指数回踩生命线，注意短线洗盘！"
+                market_status = "🔴 极度预警：标普(SPY) 与 纳指(QQQ) 双双跌破EMA20，全市场防守！"
+            elif spy_close < spy_ema20:
+                market_status = "⚠️ 警示：标普(SPY) 跌破均线生命线，大盘传统权重股走弱！"
+            elif qqq_close < qqq_ema20:
+                market_status = "⚠️ 警示：纳指(QQQ) 跌破均线生命线，科技成长股短线承压！"
     except Exception:
         pass
 
@@ -239,9 +247,9 @@ def fetch_and_analyze(ticker_input):
     except Exception:
         vwap_price = cur_price
 
-    vwap_status_desc = "多头主导" if cur_price > vwap_price * 1.002 else "空头压制" if cur_price < vwap_price * 0.998 else "多空博弈中轴"
+    vwap_status_desc = "多头主导(高于日内成本)" if cur_price > vwap_price * 1.002 else "空头压制(低于日内成本)" if cur_price < vwap_price * 0.998 else "多空平衡(紧贴成本)"
 
-    # 均线系统
+    # 均线体系
     ema5 = EMAIndicator(close_d, min(5, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close_d, min(20, total_days)).ema_indicator().iloc[-1]
     ma30 = SMAIndicator(close_d, min(30, total_days)).sma_indicator().iloc[-1]
@@ -249,40 +257,64 @@ def fetch_and_analyze(ticker_input):
     ma120 = SMAIndicator(close_d, 120).sma_indicator().iloc[-1] if total_days >= 120 else None
     ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if total_days >= 250 else None
 
+    # 跳空缺口识别
+    gap_support = None
+    prev_close_p = close_d.iloc[-2] if total_days >= 2 else cur_price
+    if total_days >= 2:
+        recent_low = low_d.iloc[-1]
+        prev_high = high_d.iloc[-2]
+        if recent_low > prev_high:
+            gap_support = round(recent_low, 2)
+        elif recent_low > prev_close_p:
+            gap_support = round(prev_close_p, 2)
+
     rsi_d = RSIIndicator(close_d, min(14, total_days)).rsi().iloc[-1]
     macd_diff_d = MACD(close_d).macd_diff().iloc[-1]
     atr_d = AverageTrueRange(high_d, low_d, close_d, min(14, total_days)).average_true_range().iloc[-1]
 
-    # 筹码分布 (Volume Profile) 与衍生品数据
+    # 微观筹码与期权链
     vp_data = calculate_institutional_volume_profile(df_daily.iloc[-min(252, total_days):])
     opt_data = fetch_options_microstructure(ticker_obj, cur_price)
 
-    chip_resistances = vp_data["resistances"] or [round(high_30d, 2), round(high_52w, 2)]
-    chip_supports = vp_data["supports"] or [round(low_30d, 2)]
-
-    # 动态盈亏比与风控测算 (基于 1.5x ATR 动态止损)
-    target1_p = chip_resistances[0]
+    # 动态盈亏比与风控
+    target1_p = vp_data["resistances"][0] if vp_data["resistances"] else (high_30d if high_30d > cur_price else cur_price * 1.05)
     dynamic_stop_loss = max(low_30d, cur_price - (1.5 * atr_d))
     reward_space = max(0.01, target1_p - cur_price)
     risk_space = max(0.01, cur_price - dynamic_stop_loss)
     rr_ratio = reward_space / risk_space
 
-    # 支撑与阻力集合
-    support_list = [f"日内做市商成本 (VWAP): ${vwap_price:.2f}", f"生命线防守 (EMA20): ${ema20:.2f}"]
-    if vp_data["poc"] > 0:
-        support_list.append(f"筹码控制中心 (POC): ${vp_data['poc']:.2f}")
-    if vp_data["val"] > 0:
-        support_list.append(f"价值区下沿 (VAL): ${vp_data['val']:.2f}")
-    if opt_data["major_put_wall"] > 0:
-        support_list.append(f"期权看跌大单防守墙: ${opt_data['major_put_wall']:.2f}")
+    # 动态构建支撑/阻力（动态纠偏：大于现价归阻力，小于现价归支撑）
+    support_dict = {}
+    resistance_dict = {}
 
-    resistance_list = [f"第一阶梯筹码阻力: ${target1_p:.2f}"]
-    if vp_data["vah"] > 0:
-        resistance_list.append(f"价值区上沿 (VAH): ${vp_data['vah']:.2f}")
-    if opt_data["max_pain"] > 0:
-        resistance_list.append(f"期权最大痛点 (Max Pain): ${opt_data['max_pain']:.2f}")
-    if opt_data["major_call_wall"] > 0:
-        resistance_list.append(f"期权看涨大单压制墙: ${opt_data['major_call_wall']:.2f}")
+    def add_level(name, val):
+        if val and val > 0:
+            if val < cur_price:
+                support_dict[name] = val
+            else:
+                resistance_dict[name] = val
+
+    add_level("日内成本线 (VWAP)", vwap_price)
+    add_level("短线均线 (EMA5)", ema5)
+    add_level("生命线 (EMA20)", ema20)
+    add_level("中线均线 (MA30)", ma30)
+    if ma60: add_level("季线 (MA60)", ma60)
+    if ma120: add_level("半年线 (MA120)", ma120)
+    if ma250: add_level("年线 (MA250)", ma250)
+    if gap_support: add_level("短线跳空缺口", gap_support)
+    if vp_data["poc"] > 0: add_level("筹码密集峰 (POC)", vp_data["poc"])
+    if vp_data["vah"] > 0: add_level("价值区上沿 (VAH)", vp_data["vah"])
+    if vp_data["val"] > 0: add_level("价值区下沿 (VAL)", vp_data["val"])
+    if opt_data["max_pain"] > 0: add_level("期权最大痛点 (Max Pain)", opt_data["max_pain"])
+    if opt_data["major_call_wall"] > 0: add_level("期权Call大单阻力墙", opt_data["major_call_wall"])
+    if opt_data["major_put_wall"] > 0: add_level("期权Put大单支撑墙", opt_data["major_put_wall"])
+
+    # 排序支撑（由近及远从高到低）和阻力（由近及远从低到高）
+    sorted_supports = sorted(support_dict.items(), key=lambda x: x[1], reverse=True)
+    sorted_resistances = sorted(resistance_dict.items(), key=lambda x: x[1])
+
+    support_list_fmt = [f"{k}: **${v:.2f}**" for k, v in sorted_supports[:5]]
+    resistance_list_fmt = [f"{k}: **${v:.2f}**" for k, v in sorted_resistances[:5]]
 
     news_items = []
     try:
@@ -297,37 +329,46 @@ def fetch_and_analyze(ticker_input):
     except Exception:
         pass
 
-    # 机构级行动手册 Prompt
-    inst_action_prompt = f"""
-你是一名顶级对冲基金的资深量化操盘手。请基于以下微观结构与流动性数据，为交易员制定一份【机构级多空执行策略】：
+    # 顶级分层 Prompt（兼顾小白实战指令与机构微观逻辑）
+    layered_prompt = f"""
+你是一名身经百战的华尔街资深量化操盘手兼新手实战导师。
+请根据以下【大盘联动 + 经典均线/缺口 + 机构筹码分布(Volume Profile) + 期权链与ATR风控】，为用户输出一份全通透的操盘指南。
 
-【标的】: {ticker_input} ｜ 现价: **${cur_price:.2f}**
-【宏观大盘】: {market_status} ｜ 情绪度: {macro_sentiment_tag} ｜ {vix_status_str} ｜ {tnx_status_str}
-【做市商成本 (VWAP)】: **${vwap_price:.2f}** ({vwap_status_desc})
-【Volume Profile 筹码峰】: POC中心: **${vp_data['poc']:.2f}** ｜ VAH上沿: **${vp_data['vah']:.2f}** ｜ VAL下沿: **${vp_data['val']:.2f}**
-【均线防御带】: EMA5: **${ema5:.2f}** ｜ EMA20: **${ema20:.2f}** ｜ MA30: **${ma30:.2f}**
-【期权微观博弈】: Max Pain(最大痛点): **${opt_data['max_pain']:.2f}** ｜ PCR比率: **{opt_data['pcr']:.2f}** ｜ Call阻力墙: **${opt_data['major_call_wall']:.2f}** ｜ Put支撑墙: **${opt_data['major_put_wall']:.2f}**
-【波动率与风控】: 14日ATR: **${atr_d:.2f}** ｜ 建议动态止损: **${dynamic_stop_loss:.2f}** (1.5x ATR) ｜ 动态盈亏比: **{rr_ratio:.2f} : 1**
+【标的】: {ticker_input} ｜ 最新现价: **${cur_price:.2f}**
+【大盘指数环境】: {market_status} ｜ {spy_info_str} ｜ {qqq_info_str} ｜ 情绪度: {macro_sentiment_tag} (VIX: {vix_status_str})
+【经典均线与缺口】: EMA5: **${ema5:.2f}** ｜ EMA20生命线: **${ema20:.2f}** ｜ MA30: **${ma30:.2f}** ｜ 季线(MA60): {f"${ma60:.2f}" if ma60 else '无'} ｜ 缺口支撑: {f"${gap_support:.2f}" if gap_support else '无'}
+【机构微观结构】: 做市商日内VWAP: **${vwap_price:.2f}** ({vwap_status_desc}) ｜ 筹码中心(POC): **${vp_data['poc']:.2f}** ｜ 价值区(VAL~VAH): **${vp_data['val']:.2f} ~ ${vp_data['vah']:.2f}**
+【期权博弈与波动率】: 期权Max Pain: **${opt_data['max_pain']:.2f}** ｜ PCR: **{opt_data['pcr']:.2f}** ｜ Call阻力墙: **${opt_data['major_call_wall']:.2f}** ｜ 14日ATR: **${atr_d:.2f}**
+【动态盈亏比】: **{rr_ratio:.2f} : 1** ｜ 建议保护止损: **${dynamic_stop_loss:.2f}** ｜ 上方第一阻力目标: **${target1_p:.2f}**
 
-【输出规范】：
-1. 严禁模版套话，直切资金博弈本质。价格数值全部紧跟美元符号加粗（如 **$220.50**）。
-2. 请分四个板块输出：
-   - 🚦 **微观流动性与期权偏斜定性**：2-3句话剖析做市商当前是在逼空、压制还是横盘吸筹。
-   - 🛡️ **机构级分批建仓与流动性防守点**：
-     * 浅回调试仓点（VWAP / EMA20 / POC）
-     * 深度吸筹区（VAL / 1.5x ATR 容错缓冲）
-     * 结构失效硬止损位（严禁扛单）
-   - 🎯 **流动性出清与阶梯止盈位**：
-     * 第一止盈目标（VAH / 近端筹码真空边缘）
-     * 突破顺势加速位（Call Wall 挤压点）
-   - ⚖️ **盈亏比量化评估**：用交易员大白话定性当前点位性价比。
+【核心输出原则】：
+1. **彻底说人话，严禁只有黑话！** 遇到专业术语必须紧跟括号大白话说明（例如：VAH(价值区上沿阻力)、POC(最密集主力持仓价)）。
+2. 所有价格数字统一紧跟美元符号加粗（如 **$220.50**，**+4.39%**）。
+3. 严格按照以下 4 个板块输出：
+
+---
+### 🚦 1. 操盘手 3 秒极简决策灯 (新手直接看这里)
+- **核心操作定性**：直接给大白话动作（【🟢 顺势轻仓试探】 / 【🟡 观望等回踩】 / 【🔴 风险过大坚决不追】）。
+- **一句话大白话理由**：结合大盘走势、日内VWAP位置与当前 **{rr_ratio:.2f}:1** 的盈亏比，讲透为什么现在该买还是该等。
+
+### 🛡️ 2. 跌势与吸筹指南（跌了怎么买，阶梯防守）
+- **第 1 关（短线浅回调加仓点）**：明确指出回踩哪个具体价格（如 VWAP / EMA20 / 缺口）可以分批建底仓，为什么？
+- **第 2 关（波段深度吸筹大底）**：万一大盘回调，主力筹码峰(POC)或中线均线在哪个价格可以安全补仓？
+- **飞刀熔断防线（硬止损）**：跌破哪个价格（结合 **${dynamic_stop_loss:.2f}**）说明趋势彻底走坏，必须无条件止损？
+
+### 🎯 3. 涨势与止盈指南（涨了怎么卖，阶梯撤退）
+- **第一目标位（近端阻力锁定利润）**：反弹到哪个阻力位/VAH建议减仓 1/3 ~ 1/2？距离现价还有多少百分比？
+- **顺势爆发加速位**：带量突破哪个价格（结合期权 Call Wall）可判定进入主升浪，允许顺势推仓？
+
+### 🧠 4. 机构微观与衍生品深度透视 (进阶与专业交易员精读)
+- 结合大盘（SPY/QQQ）、期权 PCR 与筹码真空区，用 2-3 句话拆解主力与做市商目前的博弈意图（是在借势逼空、高位派发还是震荡洗盘）。
 """
-    ai_analysis_text = call_gemini_smart(inst_action_prompt)
+    ai_analysis_text = call_gemini_smart(layered_prompt)
 
     top_faqs = [
-        f"🚀 {ticker_input} 距离上方阻力/VAH还有多少%？突破难度如何？",
-        f"🛡️ 做市商与主力筹码底（POC/VAL）在哪个价位？跌破怎么防守？",
-        f"⚖️ 当前位置建仓的盈亏比 ({rr_ratio:.2f}:1) 是否值得出手？"
+        f"🚀 {ticker_input} 距离上方第一目标还有多少%？突破难度如何？",
+        f"🛡️ 结合均线与筹码，{ticker_input} 最安全的吸筹买点在哪个价位？",
+        f"⚖️ 当前位置的盈亏比 ({rr_ratio:.2f}:1) 是否划算？操盘手怎么看？"
     ]
 
     now_utc = datetime.now(timezone.utc)
@@ -337,31 +378,34 @@ def fetch_and_analyze(ticker_input):
         "symbol": ticker_input,
         "cur_price": cur_price,
         "market_status": market_status,
+        "spy_info_str": spy_info_str,
+        "qqq_info_str": qqq_info_str,
         "macro_sentiment_tag": macro_sentiment_tag,
         "vix_status_str": vix_status_str,
         "tnx_status_str": tnx_status_str,
         "vwap_price": vwap_price,
         "vwap_status_desc": vwap_status_desc,
+        "ema5": ema5,
         "ema20": ema20,
         "ma30": ma30,
         "ma60_str": f"${ma60:.2f}" if ma60 else "无",
         "ma250_str": f"${ma250:.2f}" if ma250 else "无",
+        "gap_support": gap_support,
         "atr_d": atr_d,
         "dynamic_stop_loss": dynamic_stop_loss,
         "vp_data": vp_data,
         "opt_data": opt_data,
-        "chip_resistances": chip_resistances,
-        "chip_supports": chip_supports,
-        "support_list": support_list,
-        "resistance_list": resistance_list,
+        "support_list_fmt": support_list_fmt,
+        "resistance_list_fmt": resistance_list_fmt,
         "rr_ratio": rr_ratio,
+        "target1_p": target1_p,
         "news_items": news_items,
         "top_faqs": top_faqs,
         "ai_analysis_text": ai_analysis_text,
         "cache_display_time": cache_display_time
     }, None
 
-# 4. 界面交互
+# 4. 界面交互与展示
 if "history_tickers" not in st.session_state:
     st.session_state.history_tickers = ["NVDA", "USAR", "TSLA", "AAPL"]
 
@@ -376,7 +420,7 @@ for i, ticker in enumerate(st.session_state.history_tickers):
 
 ticker_input = st.text_input("美股代码", value=st.session_state.selected_ticker).strip().upper()
 
-if st.button("开始机构级量化微观诊断", type="primary", use_container_width=True):
+if st.button("开始全维实战闭环诊断", type="primary", use_container_width=True):
     if ticker_input and ticker_input in st.session_state.history_tickers:
         st.session_state.history_tickers.remove(ticker_input)
     if ticker_input:
@@ -384,7 +428,7 @@ if st.button("开始机构级量化微观诊断", type="primary", use_container_
         if len(st.session_state.history_tickers) > 5:
             st.session_state.history_tickers.pop()
 
-    with st.spinner(f"正在全维解析期权链、Volume Profile 筹码与 ATR 波动率 ({ticker_input})..."):
+    with st.spinner(f"正在全维运算均线、筹码分布与衍生品博弈 ({ticker_input})..."):
         data, err = fetch_and_analyze(ticker_input)
         if err:
             st.error(f"❌ {err}")
@@ -398,46 +442,65 @@ if "current_data" in st.session_state and st.session_state.current_data:
     data = st.session_state.current_data
     curr_ticker = st.session_state.get("current_ticker", ticker_input)
 
-    st.caption(f"⚡ 数据已缓存 (刷新: {data['cache_display_time']}) ｜ 5分钟内共享无消耗")
-    st.info(f"🌐 **宏观与流动性环境：** 【{data['macro_sentiment_tag']}】 ｜ {data['vix_status_str']} ｜ 🏛️ {data['tnx_status_str']}")
+    st.caption(f"⚡ 数据已智能缓存 (刷新时间: {data['cache_display_time']}) ｜ 5分钟内共享无消耗")
+    
+    # 大盘宏观全景横幅
+    if "🔴" in data['market_status']:
+        st.error(f"**大盘风控:** {data['market_status']} ｜ {data['spy_info_str']} ｜ {data['qqq_info_str']}")
+    elif "⚠️" in data['market_status']:
+        st.warning(f"**大盘风控:** {data['market_status']} ｜ {data['spy_info_str']} ｜ {data['qqq_info_str']}")
+    else:
+        st.success(f"**大盘风控:** {data['market_status']} ｜ {data['spy_info_str']} ｜ {data['qqq_info_str']}")
+    
+    st.info(f"🌐 **市场流动性环境：** 【{data['macro_sentiment_tag']}】 ｜ {data['vix_status_str']} ｜ 🏛️ {data['tnx_status_str']}")
 
+    # 核心数据矩阵
     col_m1, col_m2, col_m3 = st.columns(3)
     col_m1.metric(label=f"{curr_ticker} 现价", value=f"${data['cur_price']:.2f}")
-    col_m2.metric(label="筹码中轴 (POC)", value=f"${data['vp_data']['poc']:.2f}")
-    rr_delta = "🟢 优秀" if data['rr_ratio'] >= 2.0 else "⚠️ 一般"
+    col_m2.metric(label="做市商成本 (VWAP)", value=f"${data['vwap_price']:.2f}")
+    rr_delta = "🟢 优秀" if data['rr_ratio'] >= 2.0 else "⚠️ 偏低/一般"
     col_m3.metric(label="动态盈亏比", value=f"{data['rr_ratio']:.2f} : 1", delta=rr_delta)
 
-    # 机构量化卡片
+    # 机构量化微观矩阵
     col_q1, col_q2, col_q3 = st.columns(3)
-    col_q1.metric(label="价值区 (VAL ➔ VAH)", value=f"${data['vp_data']['val']:.2f} - ${data['vp_data']['vah']:.2f}")
-    col_q2.metric(label="期权 Max Pain", value=f"${data['opt_data']['max_pain']:.2f}")
-    col_q3.metric(label="动态止损 (1.5x ATR)", value=f"${data['dynamic_stop_loss']:.2f}")
+    col_q1.metric(label="筹码密集区 (POC)", value=f"${data['vp_data']['poc']:.2f}")
+    col_q2.metric(label="期权痛点 (Max Pain)", value=f"${data['opt_data']['max_pain']:.2f}")
+    col_q3.metric(label="动态保护止损 (1.5x ATR)", value=f"${data['dynamic_stop_loss']:.2f}")
 
-    st.subheader("🤖 机构操盘手实战指令")
+    if data['news_items']:
+        with st.expander(f"📰 {curr_ticker} 实时盘中催化剂与新闻 ({len(data['news_items'])} 条)", expanded=False):
+            for n in data['news_items']:
+                st.write(f"- **[{n['publisher']}]** [{n['title']}]({n['link']})")
+
+    st.subheader("🤖 操盘手分层实战手册 (全维落地指令)")
     safe_render_markdown(data['ai_analysis_text'])
 
-    st.subheader("🛡️ 机构微观支撑与阻力矩阵")
+    st.subheader("🛡️ 全景关键阶梯防线 (均线/缺口/筹码共振)")
     col1, col2 = st.columns(2)
     with col1:
-        st.info("**【🟢 流动性支撑与吸筹带】**\n\n" + "\n\n".join(data['support_list']))
+        st.info("**【🟢 阶梯支撑与吸筹带（由近及远）】**\n\n" + "\n\n".join(data['support_list_fmt']))
     with col2:
-        st.warning("**【🔴 机构阻力与出清目标】**\n\n" + "\n\n".join(data['resistance_list']))
+        st.warning("**【🔴 阶梯阻力与出清目标（由近及远）】**\n\n" + "\n\n".join(data['resistance_list_fmt']))
 
-    # 机构级 AI 追问助理
+    # 智能 AI 追问助理
     st.divider()
-    st.subheader("💬 机构微观追问助理")
-    
+    st.subheader("💬 操盘手智能追问助理")
+    st.caption("💡 支持空间数学计算、均线缺口推演、期权筹码深度解析与多股对比。")
+
     clicked_faq = None
     if "top_faqs" in data and data["top_faqs"]:
         for idx, faq_text in enumerate(data["top_faqs"]):
             if st.button(faq_text, key=f"faq_{idx}", use_container_width=True):
                 clicked_faq = faq_text
 
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             safe_render_markdown(msg["content"])
 
-    user_input = st.chat_input("自由提问（如：到230有多少%？做市商防守位在哪？跌破POC怎么看？）...")
+    user_input = st.chat_input("自由提问（如：到230有多少%？跌破EMA20怎么看？做市商防守位在哪？）...")
     prompt_to_process = user_input or clicked_faq
 
     if prompt_to_process:
@@ -446,7 +509,7 @@ if "current_data" in st.session_state and st.session_state.current_data:
             safe_render_markdown(prompt_to_process)
 
         with st.chat_message("assistant"):
-            with st.spinner("机构量化引擎正在解析订单流与衍生品博弈..."):
+            with st.spinner("操盘智脑正在结合全景均线与微观订单流推演..."):
                 extracted_symbols = extract_tickers_from_text(prompt_to_process)
                 extra_data_text = ""
                 
@@ -456,41 +519,31 @@ if "current_data" in st.session_state and st.session_state.current_data:
                             other_data, _ = fetch_and_analyze(sym)
                             if other_data:
                                 extra_data_text += f"""
-                                【联动标的 {sym} 数据】:
-                                现价: ${other_data['cur_price']:.2f} | 盈亏比: {other_data['rr_ratio']:.2f}:1 | VWAP: ${other_data['vwap_price']:.2f} | POC: ${other_data['vp_data']['poc']:.2f}
+                                【联动标的 {sym} 关键数据】:
+                                现价: ${other_data['cur_price']:.2f} | 盈亏比: {other_data['rr_ratio']:.2f}:1 | VWAP: ${other_data['vwap_price']:.2f} | EMA20: ${other_data['ema20']:.2f}
                                 """
                         except Exception:
                             pass
 
-                news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无重大异常资讯"
+                news_brief = "\n".join([f"- {n['title']}" for n in data['news_items'][:3]]) if data['news_items'] else "无重大突发新闻"
                 
-                context_prompt = f"""
-你是一名顶级对冲基金的高级量化交易员。你精通订单流、做市商对冲机制（Gamma/Delta）、Volume Profile 与严格的动态风险敞口管理。
+                chat_context_prompt = f"""
+你是一名顶级美股操盘手兼量化导师。你说话干练、接地气，既精通微观期权筹码，也能用最通俗的大白话把交易点位讲透。
 
-【标的】: {curr_ticker} ｜ 现价: **${data['cur_price']:.2f}**
-【宏观环境】: {data['market_status']} ｜ 情绪度: {data['macro_sentiment_tag']}
-【突发资讯】:
-{news_brief}
-
-━━━━━━━━【微观流动性与筹码结构】━━━━━━━━
-● 日内做市商分水岭 (VWAP): **${data['vwap_price']:.2f}** ({data['vwap_status_desc']})
-● 筹码密集核心 (POC): **${data['vp_data']['poc']:.2f}**
-● 价值区上沿 (VAH 阻力): **${data['vp_data']['vah']:.2f}** ｜ 价值区下沿 (VAL 支撑): **${data['vp_data']['val']:.2f}**
-● 均线防御: EMA20: **${data['ema20']:.2f}** ｜ MA30: **${data['ma30']:.2f}** ｜ MA60: {data['ma60_str']} ｜ MA250: {data['ma250_str']}
-
-━━━━━━━━【衍生品与波动率风控】━━━━━━━━
-● 期权结构: Max Pain: **${data['opt_data']['max_pain']:.2f}** ｜ PCR: **{data['opt_data']['pcr']:.2f}** ｜ Call Wall: **${data['opt_data']['major_call_wall']:.2f}** ｜ Put Wall: **${data['opt_data']['major_put_wall']:.2f}**
-● 14日ATR: **${data['atr_d']:.2f}** ｜ 动态保护止损: **${data['dynamic_stop_loss']:.2f}**
-● 动态盈亏比: **{data['rr_ratio']:.2f} : 1**
+【当前标的】: {curr_ticker} ｜ 现价: **${data['cur_price']:.2f}**
+【大盘环境】: {data['market_status']} ｜ {data['spy_info_str']} ｜ {data['qqq_info_str']}
+【均线体系】: EMA5: **${data['ema5']:.2f}** ｜ EMA20: **${data['ema20']:.2f}** ｜ MA30: **${data['ma30']:.2f}** ｜ 季线: {data['ma60_str']} ｜ 缺口: {f"${data['gap_support']:.2f}" if data['gap_support'] else '无'}
+【微观筹码与期权】: 做市商VWAP: **${data['vwap_price']:.2f}** ｜ POC密集峰: **${data['vp_data']['poc']:.2f}** ｜ 价值区(VAL~VAH): **${data['vp_data']['val']:.2f} ~ ${data['vp_data']['vah']:.2f}** ｜ 期权Max Pain: **${data['opt_data']['max_pain']:.2f}**
+【风控基准】: 14日ATR: **${data['atr_d']:.2f}** ｜ 建议动态止损: **${data['dynamic_stop_loss']:.2f}** ｜ 动态盈亏比: **{data['rr_ratio']:.2f} : 1**
 {extra_data_text}
 
 用户的真实提问是: "{prompt_to_process}"
 
-━━━━━━━━【响应准则】━━━━━━━━
-1. **直接给出结论与精确数学计算**：问空间必算涨跌幅百分比；问阻力结合 VAH 与期权 Call Wall；问支撑结合 POC、VAL 与 1.5x ATR 容错底线。
-2. **所有数字统一严格加粗**（如 **$230.47**，**+4.39%**）。
-3. 语言犀利、干练，完全以机构交易员的实战风控视角进行解答。
+【回答规范】：
+1. **直奔主题给结论**：问涨跌空间必做数学计算并给出精确百分比；问买点必给具体价格区间与均线/筹码理由；问盈亏比直接定性（划算/不划算）。
+2. **通俗与专业兼备**：如果用到微观指标，必须用大白话解释其对散户交易的实际含义。
+3. **数字严格加粗**：所有涉及的价格数字紧跟美元符号加粗（如 **$230.47**，**+4.39%**）。
 """
-                reply_text = call_gemini_smart(context_prompt)
+                reply_text = call_gemini_smart(chat_context_prompt)
                 safe_render_markdown(reply_text)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
