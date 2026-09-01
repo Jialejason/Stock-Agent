@@ -14,7 +14,7 @@ from ta.volatility import AverageTrueRange
 import yfinance as yf
 
 # ----------------------------------------------------
-# 0. Moomoo API 兼容性与安全垫片导入
+# 0. Moomoo API 兼容性与安全垫片导入 (解决 NameError)
 # ----------------------------------------------------
 try:
     from moomoo import (
@@ -25,7 +25,6 @@ try:
     MOOMOO_AVAILABLE = True
 except Exception:
     MOOMOO_AVAILABLE = False
-    # 安全防爆垫片：在 Streamlit Cloud 或未安装环境防止抛出 NameError
     class TrdEnv:
         SIMULATE = "SIMULATE"
         REAL = "REAL"
@@ -46,7 +45,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置、密钥清洗与专属 AQ. REST 通信引擎
+# 1. 基础配置与专为 AQ. 密钥适配的 REST 引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -64,7 +63,6 @@ def safe_render_markdown(text):
         return
     st.markdown(text.replace("$", "\\$"))
 
-# 严苛自动清洗 API Key
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = str(raw_api_key).strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
 
@@ -94,11 +92,10 @@ def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
     
-    # 针对 Google 新版 AQ. 格式专用的 Header 原生调用
     models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": api_key  # 严格仅使用 x-goog-api-key，禁止带 Authorization 和 URL key
+        "x-goog-api-key": api_key
     }
     payload = {
         "contents": [{
@@ -307,7 +304,6 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     low_30d = low_d.iloc[-min(30, total_days):].min()
     high_30d = high_d.iloc[-min(30, total_days):].max()
 
-    # VWAP 计算
     vwap_price = cur_price
     try:
         df_intraday = yf.download(ticker_input, period="1d", interval="5m", auto_adjust=True, progress=False)
@@ -414,7 +410,6 @@ with tab1:
     if not trd_ctx:
         st.warning("⚠️ 未连接到本地 Moomoo OpenD 网关。若在云端运行仅供研报分析；若在本地，请确保 OpenD.exe 处于运行状态。")
     else:
-        # 1. 资产总览
         ret_acc, acc_df = trd_ctx.accinfo_query(trd_env=active_trd_env)
         total_assets, cash_val, mkt_val = 0.0, 0.0, 0.0
         if ret_acc == 0 and not acc_df.empty:
@@ -432,7 +427,6 @@ with tab1:
 
         st.divider()
 
-        # 2. 持仓监控与自动止盈止损
         st.subheader("📦 当前持仓 & 动态止盈止损矩阵")
         ret_pos, pos_df = trd_ctx.position_list_query(trd_env=active_trd_env)
         held_codes = []
@@ -452,7 +446,6 @@ with tab1:
                     use_container_width=True
                 )
 
-                # 自动风控逻辑执行
                 if auto_trade_enabled:
                     for _, r in active_p.iterrows():
                         code = r['code']
@@ -478,7 +471,6 @@ with tab1:
 
         st.divider()
 
-        # 3. 机会扫描与自动建仓
         st.subheader("📡 机会挖掘与自动建仓")
         if auto_trade_enabled and quote_ctx:
             st.caption("🔍 量化引擎正在轮询扫描候选池...")
@@ -505,7 +497,6 @@ with tab1:
 
         st.divider()
 
-        # 4. 手动快捷下单面板
         st.subheader("⚡ 手动快捷下单")
         mc1, mc2, mc3, mc4 = st.columns(4)
         m_code = mc1.text_input("股票代码 (如 US.AAPL)", value="US.AAPL")
@@ -576,7 +567,7 @@ with tab4:
     else:
         st.caption("暂无交易日志记录。")
 
-# 自动轮询机制（全自动开启时每 10 秒刷新一次页面）
+# 自动轮询机制
 if auto_trade_enabled:
     time.sleep(10)
     st.rerun()
