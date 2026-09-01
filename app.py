@@ -45,7 +45,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置与专为 AQ. 密钥适配的 REST 引擎 (更新官方精确模型名)
+# 1. 基础配置与最新 Gemini 模型适配引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -92,12 +92,12 @@ def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
     
-    # 使用 Google 官方支持的标准模型版本
+    # 官方要求的最新标准模型队列
     models = [
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3-flash",
         "gemini-2.0-flash",
-        "gemini-2.5-flash"
+        "gemini-1.5-flash-latest"
     ]
     headers = {
         "Content-Type": "application/json",
