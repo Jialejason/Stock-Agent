@@ -16,7 +16,7 @@ from ta.volatility import AverageTrueRange
 import yfinance as yf
 
 # ----------------------------------------------------
-# 0. Moomoo API 兼容性与跨环境安全垫片
+# 0. Moomoo API 兼容性与安全导入
 # ----------------------------------------------------
 try:
     from moomoo import (
@@ -41,37 +41,52 @@ except Exception:
         NORMAL = "NORMAL"
         MARKET = "MARKET"
 
-# 页面基础配置
-st.set_page_config(page_title="Moomoo 智能量化交易 & AI投顾终端 Pro Max", page_icon="⚡", layout="wide")
-st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
-st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
+# 页面基础配置（移动端优先）
+st.set_page_config(
+    page_title="Moomoo 智能量化控制台",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# 移动端卡片式样式注入
+st.markdown("""
+<style>
+    .metric-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 12px 16px;
+        border-left: 4px solid #1E88E5;
+        flex: 1 1 calc(33% - 10px);
+        min-width: 140px;
+    }
+    .metric-title { font-size: 13px; color: #6c757d; margin-bottom: 2px; }
+    .metric-val { font-size: 20px; font-weight: bold; color: #212529; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🛡️ Moomoo 智能量化控制台")
 
 # ----------------------------------------------------
-# 1. 基础配置与自适应 ListModels 智脑通信引擎
+# 1. 基础配置与 Gemini / Pushover 通信引擎
 # ----------------------------------------------------
-TICKER_ALIASES = {
-    "TESLA": "TSLA", "特斯拉": "TSLA",
-    "APPLE": "AAPL", "苹果": "AAPL",
-    "NVIDIA": "NVDA", "英伟达": "NVDA",
-    "GOOGLE": "GOOGL", "谷歌": "GOOGL",
-    "AMAZON": "AMZN", "亚马逊": "AMZN",
-    "MICROSOFT": "MSFT", "微软": "MSFT",
-    "META": "META", "脸书": "META",
-    "AMD": "AMD", "超微": "AMD"
-}
-
-def safe_render_markdown(text):
-    if not text:
-        return
-    st.markdown(text.replace("$", "\\$"))
-
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = str(raw_api_key).strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
 
 PUSHOVER_USER_KEY = st.secrets.get("PUSHOVER_USER_KEY", "") if "PUSHOVER_USER_KEY" in st.secrets else ""
 PUSHOVER_API_TOKEN = st.secrets.get("PUSHOVER_API_TOKEN", "") if "PUSHOVER_API_TOKEN" in st.secrets else ""
 
-def send_pushover_alert(message, title="🛡️ 美股投顾量化预警", priority=0, sound="cashregister"):
+def safe_render_markdown(text):
+    if text:
+        st.markdown(text.replace("$", "\\$"))
+
+def send_pushover_alert(message, title="🛡️ 美股量化预警", priority=0, sound="cashregister"):
     if not PUSHOVER_USER_KEY or not PUSHOVER_API_TOKEN:
         return False
     try:
@@ -99,15 +114,13 @@ def call_gemini_smart(prompt_text):
         "x-goog-api-key": api_key
     }
     payload = {
-        "contents": [{
-            "parts": [{"text": prompt_text}]
-        }]
+        "contents": [{"parts": [{"text": prompt_text}]}]
     }
 
     usable_models = []
     try:
         list_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        resp_list = requests.get(list_url, headers=headers, timeout=10)
+        resp_list = requests.get(list_url, headers=headers, timeout=8)
         if resp_list.status_code == 200:
             all_models = resp_list.json().get("models", [])
             for item in all_models:
@@ -119,12 +132,7 @@ def call_gemini_smart(prompt_text):
         pass
 
     if not usable_models:
-        usable_models = [
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-002",
-            "gemini-1.5-pro"
-        ]
+        usable_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
 
     last_error = ""
     for m in usable_models:
@@ -148,9 +156,8 @@ def call_gemini_smart(prompt_text):
     return f"⚠️ 智脑调用异常: `{last_error}`"
 
 # ----------------------------------------------------
-# 2. Moomoo 账户与交易核心连接模块
+# 2. Moomoo 连接与日志管理
 # ----------------------------------------------------
-@st.cache_resource
 def get_moomoo_contexts(host="127.0.0.1", port=11111):
     if not MOOMOO_AVAILABLE:
         return None, None
@@ -171,11 +178,11 @@ def record_trade_log(action, symbol, detail):
         st.session_state.trade_audit_logs = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.session_state.trade_audit_logs.insert(0, {"时间": now, "操作": action, "标的": symbol, "详细信息": detail})
-    if len(st.session_state.trade_audit_logs) > 50:
+    if len(st.session_state.trade_audit_logs) > 30:
         st.session_state.trade_audit_logs.pop()
 
 # ----------------------------------------------------
-# 3. 机构微观结构、图表与基本面计算
+# 3. 筹码与量化算法模块
 # ----------------------------------------------------
 def calculate_institutional_volume_profile(df_daily, bins=40):
     if df_daily.empty or 'Close' not in df_daily.columns or 'Volume' not in df_daily.columns:
@@ -220,14 +227,13 @@ def calculate_institutional_volume_profile(df_daily, bins=40):
 
 def plot_microstructure_chart(df_daily, symbol, cur_price, vp_data, sl_price, tp_price):
     try:
-        recent_df = df_daily.iloc[-90:].copy()
+        recent_df = df_daily.iloc[-60:].copy()
         fig = make_subplots(
             rows=1, cols=2, shared_yaxes=True,
             column_widths=[0.8, 0.2], horizontal_spacing=0.03,
-            subplot_titles=(f"📈 {symbol} 90日 K线与攻防矩阵", "📊 筹码分布 (VP)")
+            subplot_titles=(f"📈 {symbol} 攻防矩阵", "📊 筹码峰")
         )
 
-        # K 线
         fig.add_trace(go.Candlestick(
             x=recent_df.index,
             open=recent_df['Open'], high=recent_df['High'],
@@ -235,12 +241,10 @@ def plot_microstructure_chart(df_daily, symbol, cur_price, vp_data, sl_price, tp
             name="K线"
         ), row=1, col=1)
 
-        # 止损止盈标线
-        fig.add_hline(y=sl_price, line_dash="dash", line_color="red", annotation_text=f"防守止损: ${sl_price:.2f}", row=1, col=1)
-        fig.add_hline(y=tp_price, line_dash="dash", line_color="green", annotation_text=f"目标止盈: ${tp_price:.2f}", row=1, col=1)
-        fig.add_hline(y=vp_data["poc"], line_color="orange", annotation_text=f"POC筹码峰: ${vp_data['poc']:.2f}", row=1, col=1)
+        fig.add_hline(y=sl_price, line_dash="dash", line_color="red", annotation_text=f"止损: ${sl_price:.2f}", row=1, col=1)
+        fig.add_hline(y=tp_price, line_dash="dash", line_color="green", annotation_text=f"止盈: ${tp_price:.2f}", row=1, col=1)
+        fig.add_hline(y=vp_data["poc"], line_color="orange", annotation_text=f"POC: ${vp_data['poc']:.2f}", row=1, col=1)
 
-        # 筹码分布横向直方图
         if vp_data["bin_centers"] and vp_data["vol_profile"]:
             fig.add_trace(go.Bar(
                 x=vp_data["vol_profile"],
@@ -251,7 +255,7 @@ def plot_microstructure_chart(df_daily, symbol, cur_price, vp_data, sl_price, tp
             ), row=1, col=2)
 
         fig.update_layout(
-            height=420, margin=dict(l=10, r=10, t=30, b=10),
+            height=380, margin=dict(l=5, r=5, t=30, b=5),
             showlegend=False, xaxis_rangeslider_visible=False,
             template="plotly_dark"
         )
@@ -298,86 +302,44 @@ def fetch_fundamental_and_analyst_data(ticker_obj):
             if abs(val) >= 1e6: return f"${val/1e6:.2f}M"
             return f"${val:.2f}"
 
-        earnings_date_str = "未公布"
-        try:
-            cal = ticker_obj.calendar
-            if isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index:
-                ed = cal.loc['Earnings Date'].iloc[0]
-                earnings_date_str = str(ed)[:10]
-            elif isinstance(cal, dict) and 'Earnings Date' in cal:
-                earnings_date_str = str(cal['Earnings Date'][0])[:10]
-        except Exception:
-            pass
-
         return {
             "market_cap": fmt_curr(info.get("marketCap")),
-            "total_cash": fmt_curr(info.get("totalCash")),
-            "operating_cash_flow": fmt_curr(info.get("operatingCashflow")),
-            "net_income_ttm": fmt_curr(info.get("netIncomeToCommon")),
-            "pe_ttm": f"{info.get('trailingPE', 0):.2f}" if info.get('trailingPE') else "亏损 / N/A",
-            "ps_ttm": f"{info.get('priceToSalesTrailing12Months', 0):.2f}" if info.get('priceToSalesTrailing12Months') else "N/A",
+            "pe_ttm": f"{info.get('trailingPE', 0):.2f}" if info.get('trailingPE') else "N/A",
             "short_ratio_float": f"{info.get('shortPercentOfFloat', 0) * 100:.2f}%" if info.get('shortPercentOfFloat') else "N/A",
             "short_days_to_cover": f"{info.get('shortRatio', 0):.2f}" if info.get('shortRatio') else "N/A",
             "target_mean": info.get("targetMeanPrice"),
-            "target_high": info.get("targetHighPrice"),
-            "target_low": info.get("targetLowPrice"),
-            "recommendation_key": info.get("recommendationKey", "N/A").upper().replace("_", " "),
-            "num_analysts": info.get("numberOfAnalystOpinions", 0),
-            "earnings_date": earnings_date_str
+            "recommendation_key": info.get("recommendationKey", "N/A").upper().replace("_", " ")
         }
     except Exception:
         return {
-            "market_cap": "N/A", "total_cash": "N/A", "operating_cash_flow": "N/A", "net_income_ttm": "N/A",
-            "pe_ttm": "N/A", "ps_ttm": "N/A", "short_ratio_float": "N/A", "short_days_to_cover": "N/A",
-            "target_mean": None, "target_high": None, "target_low": None,
-            "recommendation_key": "N/A", "num_analysts": 0, "earnings_date": "未公布"
+            "market_cap": "N/A", "pe_ttm": "N/A", "short_ratio_float": "N/A",
+            "short_days_to_cover": "N/A", "target_mean": None, "recommendation_key": "N/A"
         }
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     ticker_input = ticker_input.strip().upper()
-    macro_tickers = ["SPY", "QQQ", "^VIX", "^TNX"]
-    macro_data = yf.download(macro_tickers, period="3mo", interval="1d", auto_adjust=True, progress=False)
+    macro_tickers = ["SPY", "QQQ", "^VIX"]
+    macro_data = yf.download(macro_tickers, period="1mo", interval="1d", auto_adjust=True, progress=False)
     
-    market_status = "🟢 多头顺风：标普与纳指稳居 EMA20 上方。"
-    spy_info_str, qqq_info_str = "SPY: 正常", "QQQ: 正常"
-    vix_status_str, tnx_status_str = "正常", "正常"
-    macro_sentiment_tag = "🟢 情绪向好"
+    market_status = "🟢 多头顺风"
     macro_score = 30
-
     try:
         if not macro_data.empty:
             close_data = macro_data['Close']
             spy_c = close_data['SPY'].dropna()
             spy_close = spy_c.iloc[-1]
-            spy_prev = spy_c.iloc[-2] if len(spy_c) >= 2 else spy_close
-            spy_chg = (spy_close - spy_prev) / spy_prev
             spy_ema20 = EMAIndicator(spy_c, 20).ema_indicator().iloc[-1]
-            spy_info_str = f"SPY: ${spy_close:.2f} ({spy_chg*100:+.2f}%)"
-
-            qqq_c = close_data['QQQ'].dropna()
-            qqq_close = qqq_c.iloc[-1]
-            qqq_prev = qqq_c.iloc[-2] if len(qqq_c) >= 2 else qqq_close
-            qqq_chg = (qqq_close - qqq_prev) / qqq_prev
-            qqq_ema20 = EMAIndicator(qqq_c, 20).ema_indicator().iloc[-1]
-            qqq_info_str = f"QQQ: ${qqq_close:.2f} ({qqq_chg*100:+.2f}%)"
-
             vix_close = close_data['^VIX'].dropna().iloc[-1]
-            vix_status_str = f"⚠️ 恐慌高企 (VIX={vix_close:.2f})" if vix_close > 22 else f"🟢 恐慌平稳 (VIX={vix_close:.2f})"
-            tnx_close = close_data['^TNX'].dropna().iloc[-1]
-            tnx_status_str = f"10Y美债收益率: {tnx_close:.2f}%"
 
-            if (spy_close < spy_ema20 and qqq_close < qqq_ema20) or vix_close >= 25:
-                market_status = "🔴 极度预警：标普与纳指双双破位EMA20，全市场防守！"
-                macro_score = 5
-            elif spy_close < spy_ema20 or qqq_close < qqq_ema20:
-                market_status = "⚠️ 警示：核心指数跌破生命线！"
-                macro_score = 15
+            if spy_close < spy_ema20 or vix_close >= 25:
+                market_status = "🔴 逆风防守"
+                macro_score = 10
     except Exception:
         pass
 
     ticker_obj = yf.Ticker(ticker_input)
-    df_daily = yf.download(ticker_input, period="2y", interval="1d", auto_adjust=True, progress=False)
+    df_daily = yf.download(ticker_input, period="1y", interval="1d", auto_adjust=True, progress=False)
     if df_daily.empty:
         return None, f"未找到股票 [{ticker_input}] 的行情数据。"
     if isinstance(df_daily.columns, pd.MultiIndex):
@@ -388,35 +350,10 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     total_days = len(close_d)
 
     low_30d = low_d.iloc[-min(30, total_days):].min()
-    high_30d = high_d.iloc[-min(30, total_days):].max()
-
-    # VWAP 计算
-    vwap_price = cur_price
-    try:
-        df_intraday = yf.download(ticker_input, period="1d", interval="5m", auto_adjust=True, progress=False)
-        if not df_intraday.empty:
-            if isinstance(df_intraday.columns, pd.MultiIndex):
-                df_intraday.columns = df_intraday.columns.get_level_values(0)
-            typical_p = (df_intraday['High'] + df_intraday['Low'] + df_intraday['Close']) / 3.0
-            if df_intraday['Volume'].sum() > 0:
-                vwap_price = (typical_p * df_intraday['Volume']).sum() / df_intraday['Volume'].sum()
-    except Exception:
-        vwap_price = cur_price
-
-    vwap_status_desc = "多头主导(高于日内成本)" if cur_price > vwap_price * 1.002 else "空头压制(低于日内成本)" if cur_price < vwap_price * 0.998 else "多空平衡"
-
-    ema5 = EMAIndicator(close_d, min(5, total_days)).ema_indicator().iloc[-1]
-    ema10 = EMAIndicator(close_d, min(10, total_days)).ema_indicator().iloc[-1]
     ema20 = EMAIndicator(close_d, min(20, total_days)).ema_indicator().iloc[-1]
-    ma50 = SMAIndicator(close_d, min(50, total_days)).sma_indicator().iloc[-1]
-    ma200 = SMAIndicator(close_d, 200).sma_indicator().iloc[-1] if total_days >= 200 else None
-
-    cross_status = "中性排列"
-    if ma50 and ma200:
-        cross_status = "🔴 50日与200日呈现死亡交叉" if ma50 < ma200 else "🟢 50日与200日呈现黄金交叉"
-
     atr_d = AverageTrueRange(high_d, low_d, close_d, min(14, total_days)).average_true_range().iloc[-1]
-    vp_data = calculate_institutional_volume_profile(df_daily.iloc[-min(252, total_days):])
+    
+    vp_data = calculate_institutional_volume_profile(df_daily.iloc[-min(120, total_days):])
     opt_data = fetch_options_microstructure(ticker_obj, cur_price)
     funda_data = fetch_fundamental_and_analyst_data(ticker_obj)
 
@@ -424,294 +361,167 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     dynamic_stop_loss = max(low_30d, cur_price - (1.5 * atr_d))
     rr_ratio = max(0.01, target1_p - cur_price) / max(0.01, cur_price - dynamic_stop_loss)
 
-    # 量化多空总分测算 (0-100)
-    tech_score = 25 if cur_price > ema20 else 10
-    vwap_score = 20 if cur_price > vwap_price else 5
-    opt_score = 15 if opt_data['pcr'] < 0.9 else 5
-    total_quant_score = macro_score + tech_score + vwap_score + opt_score
-
-    position_context = f"【当前持仓】持仓成本价: ${user_cost:.2f} | 持仓数量: {user_qty} 股 | 浮动盈亏: {((cur_price-user_cost)/user_cost*100):+.2f}%" if user_qty > 0 else "【当前状态】空仓观望中（寻找右侧入场契机）"
+    total_quant_score = macro_score + (35 if cur_price > ema20 else 15) + (35 if opt_data['pcr'] < 0.9 else 15)
+    pos_desc = f"持仓成本: ${user_cost:.2f} | 数量: {user_qty} 股" if user_qty > 0 else "空仓观望"
 
     layered_prompt = f"""
-你是一名华尔街对冲基金资深首席宏观量化操盘手兼个人私人首席投资顾问。
-请根据以下全维微观结构、衍生品博弈与基本面数据，为我生成一份**极其详尽、条理严谨、直击要害**的顶级实战研报：
+你是一名华尔街首席宏观量化操盘手，请针对标的 {ticker_input} 提供一份极简有力的实战研报：
+- 标的: {ticker_input} ｜ 现价: ${cur_price:.2f} ｜ 评分: {total_quant_score}/100 ｜ 宏观: {market_status}
+- 均线与ATR: EMA20: ${ema20:.2f} ｜ 14日ATR: ${atr_d:.2f} ｜ 动态止损线: ${dynamic_stop_loss:.2f}
+- 筹码与期权: POC筹码峰: ${vp_data['poc']:.2f} ｜ Max Pain: ${opt_data['max_pain']:.2f} ｜ PCR: {opt_data['pcr']:.2f}
+- 基本面与评级: 市值: {funda_data['market_cap']} ｜ 投行评级: {funda_data['recommendation_key']} ｜ 空头比例: {funda_data['short_ratio_float']}
+- 用户持仓状态: {pos_desc} ｜ 第一目标价: ${target1_p:.2f} ｜ 盈亏比: {rr_ratio:.2f}:1
 
-【宏观与市场环境】
-- 宏观定性: {market_status}
-- 指数标尺: {spy_info_str} ｜ {qqq_info_str} ｜ {vix_status_str} ｜ {tnx_status_str}
-
-【个股技术面与趋势阵地】
-- 标的代码: {ticker_input} ｜ 最新市价: **${cur_price:.2f}** ｜ 量化多空总分: **{total_quant_score}/100**
-- 均线矩阵: EMA5: **${ema5:.2f}** ｜ EMA10: **${ema10:.2f}** ｜ EMA20(生命线): **${ema20:.2f}** ｜ MA50: **${ma50:.2f}** ｜ MA200: {f"${ma200:.2f}" if ma200 else '无'}
-- 均线态势: {cross_status}
-- 波动率与保护止损: 14日ATR: **${atr_d:.2f}** ｜ 30日低点: **${low_30d:.2f}** ｜ 动态保护止损: **${dynamic_stop_loss:.2f}**
-
-【机构筹码与微观结构 (Volume Profile & Derivatives)】
-- 做市商日内 VWAP: **${vwap_price:.2f}** ({vwap_status_desc})
-- 机构成交量筹码峰 (POC): **${vp_data['poc']:.2f}** ｜ 价值区上沿(VAH): **${vp_data['vah']:.2f}** ｜ 价值区下沿(VAL): **${vp_data['val']:.2f}**
-- 关键阻力阵地: {', '.join([f'${p:.2f}' for p in vp_data['resistances']]) if vp_data['resistances'] else '上方筹码真空'}
-- 关键支撑阵地: {', '.join([f'${p:.2f}' for p in vp_data['supports']]) if vp_data['supports'] else f'下方防守点位: ${dynamic_stop_loss:.2f}'}
-- 期权微观博弈: 期权最大痛点 (Max Pain): **${opt_data['max_pain']:.2f}** (对应到期日: {opt_data['nearest_expiry']}) ｜ Put/Call Ratio: **{opt_data['pcr']:.2f}** ｜ 主要 Call Wall: **${opt_data['major_call_wall']:.2f}** ｜ 主要 Put Wall: **${opt_data['major_put_wall']:.2f}**
-
-【基本面与做空微观结构】
-- 市值: {funda_data['market_cap']} ｜ 现金储备: {funda_data['total_cash']} ｜ 经营现金流: {funda_data['operating_cash_flow']} ｜ 净利润: {funda_data['net_income_ttm']}
-- 估值: 市盈率 P/E: {funda_data['pe_ttm']} ｜ 市销率 P/S: {funda_data['ps_ttm']} ｜ 下次财报预期: {funda_data['earnings_date']}
-- 空头结构: 做空流通股比例: **{funda_data['short_ratio_float']}** ｜ 空头回补天数: **{funda_data['short_days_to_cover']} 天**
-- 华尔街投行评级: {funda_data['recommendation_key']} (共 {funda_data['num_analysts']} 家机构) ｜ 平均目标价: {f"${funda_data['target_mean']:.2f}" if funda_data['target_mean'] else 'N/A'} (最高: {f"${funda_data['target_high']:.2f}" if funda_data['target_high'] else 'N/A'} / 最低: {f"${funda_data['target_low']:.2f}" if funda_data['target_low'] else 'N/A'})
-
-【用户实盘仓位背景】
-- {position_context}
-- 动态预期第一止盈目标: **${target1_p:.2f}** ｜ 动态盈亏比: **{rr_ratio:.2f}:1**
-
----
-请按照以下 5 大核心模块输出极具深度、干货满满的华尔街量化实操研报：
-
-### 🚦 模块一：首席操盘手 3 秒极简决策灯
-- 核心操作定性（【极度看多 / 偏多试探 / 中性观望 / 偏空防守 / 坚决离场】）
-- 1句话直击要害的核心底层逻辑（必须结合大盘顺逆风与个股做市商 VWAP/均线生命线）。
-
-### 📊 模块二：机构微观筹码与衍生品深度博弈
-- **筹码分布 (Volume Profile)**：深度剖析现价与 POC 筹码峰、价值区 (VAH/VAL) 的相对位置，评估套牢盘与获利盘的承压结构。
-- **期权 Max Pain 与到期日效应**：解析期权最大痛点（到期日: {opt_data['nearest_expiry']}）和 Call/Put Wall 阻力对股价的牵引力或压制力。
-- **空头回补与轧空可能**：结合 Short Ratio 与回补天数评估是否存在轧空 (Short Squeeze) 契机。
-
-### 🛡️ 模块三：攻防阶梯与价格阵地
-- **建议防守止损线**：明确给出绝对防守价位与跌破执行条件（结合 ATR 与关键支撑）。
-- **阶梯止盈阵地**：明确给出 TP1（第一目标）、TP2（强阻力目标）及对应锁利比例。
-- **黑天鹅与跳空低开 (Gap Down) 应对预案**：盘前若遇突发跳空跌破止损线时的具体应对步骤。
-
-### 🧠 模块四：实操算账与量化执行指令（根据用户持仓量身定制）
-- **右侧建仓/加仓触发条件**（价格突破何处、成交量需要达到什么标准）。
-- **左侧防守/减仓/止损执行条件**。
-- **仓位管理建议**（单笔仓位上限与风控配比）。
-
-### 🎯 模块五：操盘手收尾心法
-- 用一两句精辟的专业交易心法收尾，指引长周期理性博弈。
+请按 3 个要点输出直接指导：
+1. **操盘决策灯**：明确给出定性（看多/防守/离场）与一句话核心理由。
+2. **攻防阵地**：明确写出防守止损价（${dynamic_stop_loss:.2f}）与第一目标止盈价（${target1_p:.2f}）。
+3. **执行指令**：给出现价情况下的买卖或持股建议。
 """
     ai_analysis_text = call_gemini_smart(layered_prompt)
     now_display = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%H:%M:%S")
-
     chart_fig = plot_microstructure_chart(df_daily, ticker_input, cur_price, vp_data, dynamic_stop_loss, target1_p)
 
     return {
-        "symbol": ticker_input, "cur_price": cur_price, "market_status": market_status,
-        "spy_info_str": spy_info_str, "qqq_info_str": qqq_info_str, "macro_sentiment_tag": macro_sentiment_tag,
-        "vix_status_str": vix_status_str, "tnx_status_str": tnx_status_str, "vwap_price": vwap_price,
-        "ema5": ema5, "ema20": ema20, "ma50": ma50, "ma200_str": f"${ma200:.2f}" if ma200 else "无",
-        "cross_status": cross_status, "atr_d": atr_d, "dynamic_stop_loss": dynamic_stop_loss,
-        "vp_data": vp_data, "opt_data": opt_data, "funda_data": funda_data,
-        "rr_ratio": rr_ratio, "target1_p": target1_p, "total_quant_score": total_quant_score,
-        "chart_fig": chart_fig, "ai_analysis_text": ai_analysis_text,
-        "cache_display_time": now_display
+        "symbol": ticker_input, "cur_price": cur_price, "dynamic_stop_loss": dynamic_stop_loss,
+        "target1_p": target1_p, "rr_ratio": rr_ratio, "total_quant_score": total_quant_score,
+        "chart_fig": chart_fig, "ai_analysis_text": ai_analysis_text, "cache_display_time": now_display
     }, None
 
 # ----------------------------------------------------
-# 4. 侧边栏：环境与策略总控
+# 4. 侧边栏设置
 # ----------------------------------------------------
-st.sidebar.header("⚙️ 交易环境与网关配置")
-trd_env_choice = st.sidebar.radio("交易账户环境", ["模拟盘 (Paper Trading - 推荐)", "实盘 (REAL - 谨慎)"])
-active_trd_env = TrdEnv.SIMULATE if "模拟" in trd_env_choice else TrdEnv.REAL
+with st.sidebar:
+    st.header("⚙️ 系统与风控总控")
+    if st.button("🔄 立即刷新数据", use_container_width=True):
+        st.rerun()
 
-opend_host = st.sidebar.text_input("OpenD IP", value="127.0.0.1")
-opend_port = st.sidebar.number_input("OpenD 端口", value=11111)
+    trd_env_choice = st.radio("交易环境", ["模拟盘 (SIMULATE)", "实盘 (REAL)"])
+    active_trd_env = TrdEnv.SIMULATE if "模拟" in trd_env_choice else TrdEnv.REAL
 
-trd_ctx, quote_ctx = get_moomoo_contexts(host=opend_host, port=opend_port)
+    opend_host = st.text_input("OpenD Host", value="127.0.0.1")
+    opend_port = st.number_input("OpenD Port", value=11111, step=1)
 
-st.sidebar.divider()
-st.sidebar.header("🎯 自动量化策略引擎")
-auto_trade_enabled = st.sidebar.toggle("⚡ 开启全自动交易/风控引擎", value=False)
-tp_ratio = st.sidebar.slider("📈 自动止盈目标 (%)", min_value=1.0, max_value=30.0, value=8.0, step=0.5) / 100.0
-sl_ratio = st.sidebar.slider("📉 自动止损阈值 (%)", min_value=1.0, max_value=20.0, value=4.0, step=0.5) / 100.0
-trade_qty_auto = st.sidebar.number_input("每次自动建仓股数", min_value=1, value=10, step=1)
-momentum_thresh = st.sidebar.slider("🚀 突破建仓涨幅阈值 (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.1)
-
-st.sidebar.subheader("🔍 自动扫描标的池")
-watchlist_raw = st.sidebar.text_area("候选池代码 (英文逗号隔开)", "US.AAPL, US.NVDA, US.TSLA, US.MSFT, US.AMZN, US.PLTR")
-auto_candidates = [s.strip().upper() for s in watchlist_raw.split(",") if s.strip()]
+    st.divider()
+    auto_trade_enabled = st.toggle("⚡ 自动风控/止盈止损", value=False)
+    tp_ratio = st.slider("止盈目标 (%)", 1.0, 30.0, 8.0, 0.5) / 100.0
+    sl_ratio = st.slider("止损阈值 (%)", 1.0, 20.0, 4.0, 0.5) / 100.0
 
 # ----------------------------------------------------
-# 5. 主界面 (Tab 架构)
+# 5. 单页核心监控流（无 Tab 架构）
 # ----------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
-    "⚡ 量化交易 & 自动风控控制台", 
-    "📊 私人持仓全景研报", 
-    "🔍 单股全维深度诊断", 
-    "📋 交易与预警审计流"
-])
+trd_ctx, quote_ctx = get_moomoo_contexts(host=opend_host, port=int(opend_port))
 
-# ==================== TAB 1: 量化交易执行与看板 ====================
-with tab1:
-    if not trd_ctx:
-        st.warning("⚠️ 未连接到本地 Moomoo OpenD 网关。若在云端运行仅供研报分析；若在本地，请确保 OpenD.exe 处于运行状态。")
+if not trd_ctx:
+    st.warning("⚠️ 未连接到本地 Moomoo OpenD 网关，请确保电脑端 OpenD 处于登录运行状态。")
+else:
+    # 1. 资产卡片看板
+    ret_acc, acc_df = trd_ctx.accinfo_query(trd_env=active_trd_env)
+    total_assets = acc_df['total_assets'].iloc[0] if ret_acc == 0 and not acc_df.empty else 0.0
+    cash_val = acc_df['cash'].iloc[0] if ret_acc == 0 and not acc_df.empty else 0.0
+    mkt_val = acc_df['market_val'].iloc[0] if ret_acc == 0 and not acc_df.empty else 0.0
+
+    st.markdown(f"""
+    <div class="metric-container">
+        <div class="metric-card"><div class="metric-title">💰 模拟总资产</div><div class="metric-val">${total_assets:,.2f}</div></div>
+        <div class="metric-card"><div class="metric-title">💵 可用现金</div><div class="metric-val">${cash_val:,.2f}</div></div>
+        <div class="metric-card"><div class="metric-title">📈 持股市值</div><div class="metric-val">${mkt_val:,.2f}</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 2. 持仓监控
+    st.subheader("📦 当前持仓监控")
+    ret_pos, pos_df = trd_ctx.position_list_query(trd_env=active_trd_env)
+    held_codes = []
+
+    if ret_pos == 0 and not pos_df.empty:
+        active_p = pos_df[pos_df['qty'] > 0].copy()
+        if not active_p.empty:
+            active_p['盈亏率'] = ((active_p['nominal_price'] - active_p['cost_price']) / active_p['cost_price']) * 100
+            held_codes = active_p['code'].tolist()
+
+            disp_p = active_p[['code', 'stock_name', 'qty', 'cost_price', 'nominal_price', 'pl_val', '盈亏率']]
+            disp_p.columns = ['代码', '名称', '数量', '成本价', '现价', '浮动盈亏', '盈亏率(%)']
+            
+            st.dataframe(
+                disp_p.style.format({
+                    '成本价': '${:.2f}', '现价': '${:.2f}', '浮动盈亏': '${:.2f}', '盈亏率(%)': '{:+.2f}%'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # 自动风控止盈止损执行
+            if auto_trade_enabled:
+                for _, r in active_p.iterrows():
+                    code, qty, cost, curr = r['code'], int(r['qty']), r['cost_price'], r['nominal_price']
+                    p_ratio = (curr - cost) / cost
+                    if p_ratio >= tp_ratio:
+                        trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
+                        record_trade_log("自动止盈", code, f"收益率: +{p_ratio*100:.2f}%")
+                        send_pushover_alert(f"【止盈触发】{code} 自动卖出，收益率 +{p_ratio*100:.2f}%")
+                    elif p_ratio <= -sl_ratio:
+                        trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
+                        record_trade_log("自动止损", code, f"亏损率: {p_ratio*100:.2f}%")
+                        send_pushover_alert(f"【止损触发】{code} 自动卖出，亏损率 {p_ratio*100:.2f}%")
+        else:
+            st.info("当前账户暂无持仓。")
     else:
-        ret_acc, acc_df = trd_ctx.accinfo_query(trd_env=active_trd_env)
-        total_assets, cash_val, mkt_val = 0.0, 0.0, 0.0
-        if ret_acc == 0 and not acc_df.empty:
-            total_assets = acc_df['total_assets'].iloc[0]
-            cash_val = acc_df['cash'].iloc[0]
-            mkt_val = acc_df['market_val'].iloc[0]
+        st.info("持仓查询为空。")
 
-        env_tag = "🟢 模拟盘" if active_trd_env == TrdEnv.SIMULATE else "🔴 实盘"
-        st.subheader(f"💼 账户资产看板 ({env_tag})")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("总资产", f"${total_assets:,.2f}")
-        c2.metric("可用现金", f"${cash_val:,.2f}")
-        c3.metric("证券市值", f"${mkt_val:,.2f}")
-        c4.metric("仓位使用率", f"{(mkt_val/total_assets*100) if total_assets > 0 else 0:.1f}%")
+    st.markdown("---")
 
-        st.divider()
+    # 3. 实时 AI 投顾深度诊断（折叠展开，按需查看）
+    with st.expander("🧠 AI 投顾研报诊断 & 筹码图", expanded=False):
+        diag_symbol = st.text_input("输入待诊断美股代码", value=held_codes[0].replace("US.", "") if held_codes else "NVDA").strip().upper()
+        if st.button("🚀 生成深度研报", type="primary", use_container_width=True):
+            with st.spinner("AI 正在分析微观筹码与市场结构..."):
+                diag_res, err_msg = fetch_and_analyze(diag_symbol)
+                if err_msg:
+                    st.error(err_msg)
+                else:
+                    st.session_state.diag_res = diag_res
 
-        st.subheader("📦 当前持仓 & 动态止盈止损矩阵")
-        ret_pos, pos_df = trd_ctx.position_list_query(trd_env=active_trd_env)
-        held_codes = []
+        if "diag_res" in st.session_state:
+            d = st.session_state.diag_res
+            c1, c2, c3 = st.columns(3)
+            c1.metric("现价", f"${d['cur_price']:.2f}")
+            c2.metric("止损点", f"${d['dynamic_stop_loss']:.2f}")
+            c3.metric("量化得分", f"{d['total_quant_score']}/100")
+            if d['chart_fig']:
+                st.plotly_chart(d['chart_fig'], use_container_width=True)
+            safe_render_markdown(d['ai_analysis_text'])
 
-        if ret_pos == 0 and not pos_df.empty:
-            active_p = pos_df[pos_df['qty'] > 0].copy()
-            if not active_p.empty:
-                active_p['盈亏率(%)'] = ((active_p['nominal_price'] - active_p['cost_price']) / active_p['cost_price']) * 100
-                held_codes = active_p['code'].tolist()
+    # 4. 手动快捷交易面板（折叠区）
+    with st.expander("⚡ 模拟快捷下单", expanded=False):
+        c_code, c_side = st.columns(2)
+        m_code = c_code.text_input("代码", value="US.SOXS")
+        m_side = c_side.selectbox("方向", ["买入 (BUY)", "卖出 (SELL)"])
+        
+        c_p, c_q = st.columns(2)
+        m_price = c_p.number_input("价格 ($)", value=50.0, step=0.1)
+        m_qty = c_q.number_input("数量", value=100, min_value=1, step=10)
 
-                disp_p = active_p[['code', 'stock_name', 'qty', 'cost_price', 'nominal_price', 'pl_val', '盈亏率(%)']]
-                disp_p.columns = ['代码', '名称', '持仓股数', '成本价', '现价', '浮动盈亏($)', '盈亏率(%)']
-                st.dataframe(
-                    disp_p.style.format({
-                        '成本价': '${:.2f}', '现价': '${:.2f}', '浮动盈亏($)': '${:.2f}', '盈亏率(%)': '{:+.2f}%'
-                    }),
-                    use_container_width=True
-                )
-
-                if auto_trade_enabled:
-                    for _, r in active_p.iterrows():
-                        code = r['code']
-                        qty = int(r['qty'])
-                        cost = r['cost_price']
-                        curr = r['nominal_price']
-                        p_ratio = (curr - cost) / cost
-
-                        if p_ratio >= tp_ratio:
-                            st.warning(f"🎯 触发止盈: {code} (+{p_ratio*100:.2f}%)，市价自动平仓！")
-                            trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
-                            record_trade_log("止盈卖出", code, f"收益率: +{p_ratio*100:.2f}%, 数量: {qty}")
-                            send_pushover_alert(f"【止盈达成】{code} 自动卖出 {qty} 股，收益率: +{p_ratio*100:.2f}%")
-                        elif p_ratio <= -sl_ratio:
-                            st.error(f"🛑 触发止损: {code} ({p_ratio*100:.2f}%)，市价自动离场！")
-                            trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
-                            record_trade_log("止损平仓", code, f"亏损率: {p_ratio*100:.2f}%, 数量: {qty}")
-                            send_pushover_alert(f"【止损执行】{code} 自动卖出 {qty} 股，亏损率: {p_ratio*100:.2f}%")
-            else:
-                st.info("当前无有效多头持仓。")
-        else:
-            st.info("持仓查询为空。")
-
-        st.divider()
-
-        st.subheader("📡 机会挖掘与自动建仓")
-        if auto_trade_enabled and quote_ctx:
-            st.caption("🔍 量化引擎正在轮询扫描候选池...")
-            for sym in auto_candidates:
-                formatted_sym = sym if sym.startswith("US.") else f"US.{sym}"
-                if formatted_sym in held_codes:
-                    continue
-
-                ret_q, q_df = quote_ctx.get_market_snapshot([formatted_sym])
-                if ret_q == 0 and not q_df.empty:
-                    last_p = q_df['last_price'].iloc[0]
-                    prev_c = q_df['prev_close_price'].iloc[0]
-                    chg_pct = ((last_p - prev_c) / prev_c) * 100
-
-                    if chg_pct >= momentum_thresh and cash_val > (last_p * trade_qty_auto):
-                        st.info(f"💡 发现突破标的: {formatted_sym} (涨幅: {chg_pct:+.2f}%)，自动建仓中...")
-                        ret_b, _ = trd_ctx.place_order(price=last_p, qty=trade_qty_auto, code=formatted_sym, trd_side=TrdSide.BUY, order_type=OrderType.MARKET, trd_env=active_trd_env)
-                        if ret_b == 0:
-                            record_trade_log("动量买入", formatted_sym, f"买入价: ${last_p:.2f}, 数量: {trade_qty_auto}")
-                            send_pushover_alert(f"【自动建仓】{formatted_sym} 突破买入 {trade_qty_auto} 股，价格: ${last_p:.2f}")
-                            held_codes.append(formatted_sym)
-        else:
-            st.caption("⏸️ 自动交易引擎暂停中。开启侧边栏开关以启动全自动盯盘与买卖。")
-
-        st.divider()
-
-        st.subheader("⚡ 手动快捷下单")
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        m_code = mc1.text_input("股票代码 (如 US.AAPL)", value="US.AAPL")
-        m_side = mc2.selectbox("交易方向", ["买入 (BUY)", "卖出 (SELL)"])
-        m_price = mc3.number_input("价格 ($)", value=200.0, step=0.5)
-        m_qty = mc4.number_input("股数", value=10, min_value=1, step=1)
-
-        if st.button("🚀 提交手动订单", use_container_width=True):
-            side = TrdSide.BUY if "BUY" in m_side else TrdSide.SELL
-            ret_o, res_o = trd_ctx.place_order(price=m_price, qty=m_qty, code=m_code, trd_side=side, order_type=OrderType.NORMAL, trd_env=active_trd_env)
+        if st.button("提交订单", use_container_width=True):
+            side = TrdSide.BUY if "买入" in m_side else TrdSide.SELL
+            ret_o, res_o = trd_ctx.place_order(
+                price=m_price, qty=m_qty, code=m_code.strip().upper(),
+                trd_side=side, order_type=OrderType.NORMAL, trd_env=active_trd_env
+            )
             if ret_o == 0:
-                st.success(f"✅ 订单提交成功！订单号: {res_o['order_id'].iloc[0]}")
-                record_trade_log("手动下单", m_code, f"{m_side} 数量: {m_qty}, 价格: ${m_price:.2f}")
+                st.success(f"下单成功！订单号: {res_o['order_id'].iloc[0]}")
+                record_trade_log("手动下单", m_code, f"{m_side} {m_qty}股 @ ${m_price:.2f}")
                 st.rerun()
             else:
-                st.error(f"❌ 下单失败: {res_o}")
+                st.error(f"下单失败: {res_o}")
 
-# ==================== TAB 2: 私人持仓全景研报 ====================
-with tab2:
-    st.subheader("💼 当前账户实时持仓 AI 深度复盘")
-    if trd_ctx:
-        ret_p2, pos_df2 = trd_ctx.position_list_query(trd_env=active_trd_env)
-        if ret_p2 == 0 and not pos_df2.empty and not pos_df2[pos_df2['qty'] > 0].empty:
-            valid_pos = pos_df2[pos_df2['qty'] > 0]
-            clean_symbols = [c.replace("US.", "").replace(".US", "") for c in valid_pos['code'].tolist()]
-            selected_sym = st.selectbox("选择需要投顾复盘的持仓标的:", clean_symbols)
-
-            target_row = valid_pos[valid_pos['code'].str.contains(selected_sym)].iloc[0]
-            if st.button(f"生成 {selected_sym} 专属投顾研报", type="primary"):
-                with st.spinner("AI 智脑正在深度解析持仓攻防位置..."):
-                    diag_data, d_err = fetch_and_analyze(selected_sym, user_cost=target_row['cost_price'], user_qty=int(target_row['qty']))
-                    if d_err:
-                        st.error(d_err)
-                    else:
-                        if diag_data['chart_fig']:
-                            st.plotly_chart(diag_data['chart_fig'], use_container_width=True)
-                        safe_render_markdown(diag_data['ai_analysis_text'])
+    # 5. 审计流水（折叠区）
+    with st.expander("📋 交易流水记录", expanded=False):
+        if "trade_audit_logs" in st.session_state and st.session_state.trade_audit_logs:
+            st.dataframe(pd.DataFrame(st.session_state.trade_audit_logs), use_container_width=True, hide_index=True)
         else:
-            st.info("当前账户无持仓股票。")
-    else:
-        st.info("连接到本地 OpenD 后可自动读取持仓生成研报。")
+            st.caption("暂无交易日志记录。")
 
-# ==================== TAB 3: 单股深度全维诊断 ====================
-with tab3:
-    t_in = st.text_input("输入待分析美股代码", value="NVDA").strip().upper()
-    if st.button("开始全维实战研报诊断", type="primary"):
-        with st.spinner(f"正在全维运算均线、筹码分布与衍生品博弈 ({t_in})..."):
-            data, err = fetch_and_analyze(t_in)
-            if err:
-                st.error(err)
-            else:
-                st.session_state.current_diag = data
-
-    if "current_diag" in st.session_state:
-        d = st.session_state.current_diag
-        st.caption(f"⚡ 数据已缓存 (刷新时间: {d['cache_display_time']})")
-        
-        # 顶栏核心数据与量化胜率得分
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric(f"{d['symbol']} 现价", f"${d['cur_price']:.2f}")
-        c2.metric("做市商 VWAP", f"${d['vwap_price']:.2f}")
-        c3.metric("动态盈亏比", f"{d['rr_ratio']:.2f}:1")
-        c4.metric("动态保护止损", f"${d['dynamic_stop_loss']:.2f}")
-        c5.metric("量化战斗力得分", f"{d['total_quant_score']}/100")
-
-        # 交互式 K线 + Volume Profile 攻防图
-        if d['chart_fig']:
-            st.plotly_chart(d['chart_fig'], use_container_width=True)
-
-        # 深度研报正文
-        safe_render_markdown(d['ai_analysis_text'])
-
-# ==================== TAB 4: 审计与预警日志 ====================
-with tab4:
-    st.subheader("📋 交易执行与策略审计流水 (Audit Logs)")
-    if "trade_audit_logs" in st.session_state and st.session_state.trade_audit_logs:
-        st.dataframe(pd.DataFrame(st.session_state.trade_audit_logs), use_container_width=True)
-    else:
-        st.caption("暂无交易日志记录。")
-
-# 自动轮询机制
+# 自动轮询执行
 if auto_trade_enabled:
     time.sleep(10)
     st.rerun()
