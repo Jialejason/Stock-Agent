@@ -14,7 +14,7 @@ from ta.volatility import AverageTrueRange
 import yfinance as yf
 
 # ----------------------------------------------------
-# 0. Moomoo API 兼容性与安全垫片导入
+# 0. Moomoo API 兼容性与跨环境安全垫片
 # ----------------------------------------------------
 try:
     from moomoo import (
@@ -218,8 +218,9 @@ def fetch_options_microstructure(ticker_obj, cur_price):
     try:
         expirations = ticker_obj.options
         if not expirations:
-            return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
-        opt_chain = ticker_obj.option_chain(expirations[0])
+            return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0, "nearest_expiry": "无"}
+        nearest_exp = expirations[0]
+        opt_chain = ticker_obj.option_chain(nearest_exp)
         calls, puts = opt_chain.calls, opt_chain.puts
         total_call_oi = calls['openInterest'].fillna(0).sum()
         total_put_oi = puts['openInterest'].fillna(0).sum()
@@ -235,9 +236,13 @@ def fetch_options_microstructure(ticker_obj, cur_price):
             loss_dict[s] = call_loss + put_loss
 
         max_pain = min(loss_dict, key=loss_dict.get) if loss_dict else cur_price
-        return {"max_pain": float(max_pain), "pcr": float(pcr), "major_call_wall": call_wall, "major_put_wall": put_wall}
+        return {
+            "max_pain": float(max_pain), "pcr": float(pcr), 
+            "major_call_wall": call_wall, "major_put_wall": put_wall,
+            "nearest_expiry": nearest_exp
+        }
     except Exception:
-        return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
+        return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0, "nearest_expiry": "无"}
 
 def fetch_fundamental_and_analyst_data(ticker_obj):
     try:
@@ -247,6 +252,18 @@ def fetch_fundamental_and_analyst_data(ticker_obj):
             if abs(val) >= 1e9: return f"${val/1e9:.2f}B"
             if abs(val) >= 1e6: return f"${val/1e6:.2f}M"
             return f"${val:.2f}"
+
+        # 尝试获取财报日期预警
+        earnings_date_str = "未公布"
+        try:
+            cal = ticker_obj.calendar
+            if isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index:
+                ed = cal.loc['Earnings Date'].iloc[0]
+                earnings_date_str = str(ed)[:10]
+            elif isinstance(cal, dict) and 'Earnings Date' in cal:
+                earnings_date_str = str(cal['Earnings Date'][0])[:10]
+        except Exception:
+            pass
 
         return {
             "market_cap": fmt_curr(info.get("marketCap")),
@@ -261,14 +278,15 @@ def fetch_fundamental_and_analyst_data(ticker_obj):
             "target_high": info.get("targetHighPrice"),
             "target_low": info.get("targetLowPrice"),
             "recommendation_key": info.get("recommendationKey", "N/A").upper().replace("_", " "),
-            "num_analysts": info.get("numberOfAnalystOpinions", 0)
+            "num_analysts": info.get("numberOfAnalystOpinions", 0),
+            "earnings_date": earnings_date_str
         }
     except Exception:
         return {
             "market_cap": "N/A", "total_cash": "N/A", "operating_cash_flow": "N/A", "net_income_ttm": "N/A",
             "pe_ttm": "N/A", "ps_ttm": "N/A", "short_ratio_float": "N/A", "short_days_to_cover": "N/A",
             "target_mean": None, "target_high": None, "target_low": None,
-            "recommendation_key": "N/A", "num_analysts": 0
+            "recommendation_key": "N/A", "num_analysts": 0, "earnings_date": "未公布"
         }
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -325,6 +343,7 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     low_30d = low_d.iloc[-min(30, total_days):].min()
     high_30d = high_d.iloc[-min(30, total_days):].max()
 
+    # VWAP 计算
     vwap_price = cur_price
     try:
         df_intraday = yf.download(ticker_input, period="1d", interval="5m", auto_adjust=True, progress=False)
@@ -379,11 +398,11 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 - 机构成交量筹码峰 (POC): **${vp_data['poc']:.2f}** ｜ 价值区上沿(VAH): **${vp_data['vah']:.2f}** ｜ 价值区下沿(VAL): **${vp_data['val']:.2f}**
 - 关键阻力阵地: {', '.join([f'${p:.2f}' for p in vp_data['resistances']]) if vp_data['resistances'] else '上方筹码真空'}
 - 关键支撑阵地: {', '.join([f'${p:.2f}' for p in vp_data['supports']]) if vp_data['supports'] else f'下方防守点位: ${dynamic_stop_loss:.2f}'}
-- 期权微观博弈: 期权最大痛点 (Max Pain): **${opt_data['max_pain']:.2f}** ｜ Put/Call Ratio: **{opt_data['pcr']:.2f}** ｜ 主要 Call Wall: **${opt_data['major_call_wall']:.2f}** ｜ 主要 Put Wall: **${opt_data['major_put_wall']:.2f}**
+- 期权微观博弈: 期权最大痛点 (Max Pain): **${opt_data['max_pain']:.2f}** (对应到期日: {opt_data['nearest_expiry']}) ｜ Put/Call Ratio: **{opt_data['pcr']:.2f}** ｜ 主要 Call Wall: **${opt_data['major_call_wall']:.2f}** ｜ 主要 Put Wall: **${opt_data['major_put_wall']:.2f}**
 
 【基本面与做空微观结构】
 - 市值: {funda_data['market_cap']} ｜ 现金储备: {funda_data['total_cash']} ｜ 经营现金流: {funda_data['operating_cash_flow']} ｜ 净利润: {funda_data['net_income_ttm']}
-- 估值: 市盈率 P/E: {funda_data['pe_ttm']} ｜ 市销率 P/S: {funda_data['ps_ttm']}
+- 估值: 市盈率 P/E: {funda_data['pe_ttm']} ｜ 市销率 P/S: {funda_data['ps_ttm']} ｜ 下次财报预期: {funda_data['earnings_date']}
 - 空头结构: 做空流通股比例: **{funda_data['short_ratio_float']}** ｜ 空头回补天数: **{funda_data['short_days_to_cover']} 天**
 - 华尔街投行评级: {funda_data['recommendation_key']} (共 {funda_data['num_analysts']} 家机构) ｜ 平均目标价: {f"${funda_data['target_mean']:.2f}" if funda_data['target_mean'] else 'N/A'} (最高: {f"${funda_data['target_high']:.2f}" if funda_data['target_high'] else 'N/A'} / 最低: {f"${funda_data['target_low']:.2f}" if funda_data['target_low'] else 'N/A'})
 
@@ -400,13 +419,13 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 
 ### 📊 模块二：机构微观筹码与衍生品深度博弈
 - **筹码分布 (Volume Profile)**：深度剖析现价与 POC 筹码峰、价值区 (VAH/VAL) 的相对位置，评估套牢盘与获利盘的承压结构。
-- **期权 Max Pain 与多空对冲**：解析期权最大痛点和 Call/Put Wall 阻力对股价的牵引力或压制力。
+- **期权 Max Pain 与到期日效应**：解析期权最大痛点（到期日: {opt_data['nearest_expiry']}）和 Call/Put Wall 阻力对股价的牵引力或压制力。
 - **空头回补与轧空可能**：结合 Short Ratio 与回补天数评估是否存在轧空 (Short Squeeze) 契机。
 
 ### 🛡️ 模块三：攻防阶梯与价格阵地
 - **建议防守止损线**：明确给出绝对防守价位与跌破执行条件（结合 ATR 与关键支撑）。
 - **阶梯止盈阵地**：明确给出 TP1（第一目标）、TP2（强阻力目标）及对应锁利比例。
-- **支撑与阻力矩阵**：列出清晰的强弱支撑区间与强阻力区间。
+- **黑天鹅与跳空低开 (Gap Down) 应对预案**：盘前若遇突发跳空跌破止损线时的具体应对步骤。
 
 ### 🧠 模块四：实操算账与量化执行指令（根据用户持仓量身定制）
 - **右侧建仓/加仓触发条件**（价格突破何处、成交量需要达到什么标准）。
