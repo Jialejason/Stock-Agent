@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
-import time
 import re
 from ta.trend import EMAIndicator, SMAIndicator, MACD
 from ta.momentum import RSIIndicator
@@ -28,7 +27,8 @@ TICKER_ALIASES = {
 }
 
 def safe_render_markdown(text):
-    if not text: return
+    if not text:
+        return
     clean_text = text.replace("$", "\\$")
     st.markdown(clean_text)
 
@@ -43,7 +43,7 @@ def extract_tickers_from_text(input_text):
         found_symbols.add(w)
     return found_symbols
 
-# 获取 API Key
+# 动态安全获取 API Key（不再硬编码）
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
 
@@ -252,8 +252,8 @@ def fetch_and_analyze(ticker_input):
     ma120 = SMAIndicator(close_d, 120).sma_indicator().iloc[-1] if has_ma120 else None
     ma120_str = f"${ma120:.2f}" if ma120 else "上市未满120日"
 
-    has_ma250 = total_days >= 250
-    ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_ma250 else None
+    has_has250 = total_days >= 250
+    ma250 = SMAIndicator(close_d, 250).sma_indicator().iloc[-1] if has_has250 else None
     ma250_str = f"${ma250:.2f}" if ma250 else "上市未满250日"
     
     gap_support = None
@@ -288,8 +288,10 @@ def fetch_and_analyze(ticker_input):
         chip_resistances = [round(p, 2) for p in res_bins[:3]]
         chip_supports = [round(p, 2) for p in sup_bins[:2]]
 
-    if not chip_resistances: chip_resistances = [round(high_30d, 2), round(high_52w, 2)]
-    if not chip_supports: chip_supports = [round(low_30d, 2)]
+    if not chip_resistances:
+        chip_resistances = [round(high_30d, 2), round(high_52w, 2)]
+    if not chip_supports:
+        chip_supports = [round(low_30d, 2)]
 
     resistance_list = []
     support_list = []
@@ -302,26 +304,38 @@ def fetch_and_analyze(ticker_input):
     if gap_support and gap_support < cur_price:
         support_list.append(f"🕳️ 【短线跳空缺口/浅回调支撑】: ${gap_support:.2f}")
 
-    if ema5 > cur_price: resistance_list.append(f"短线均线压制 (EMA5): ${ema5:.2f}")
-    else: support_list.append(f"超短支撑 (EMA5): ${ema5:.2f}")
+    if ema5 > cur_price:
+        resistance_list.append(f"短线均线压制 (EMA5): ${ema5:.2f}")
+    else:
+        support_list.append(f"超短支撑 (EMA5): ${ema5:.2f}")
 
-    if ema10 > cur_price: resistance_list.append(f"过渡均线压制 (EMA10): ${ema10:.2f}")
-    else: support_list.append(f"过渡防守 (EMA10): ${ema10:.2f}")
+    if ema10 > cur_price:
+        resistance_list.append(f"过渡均线压制 (EMA10): ${ema10:.2f}")
+    else:
+        support_list.append(f"过渡防守 (EMA10): ${ema10:.2f}")
 
-    if ema20 > cur_price: resistance_list.append(f"多空分水岭压制 (EMA20): ${ema20:.2f}")
-    else: support_list.append(f"多空分水岭支撑 (EMA20): ${ema20:.2f}")
+    if ema20 > cur_price:
+        resistance_list.append(f"多空分水岭压制 (EMA20): ${ema20:.2f}")
+    else:
+        support_list.append(f"多空分水岭支撑 (EMA20): ${ema20:.2f}")
 
     if ma60:
-        if ma60 > cur_price: resistance_list.append(f"季线重要均线压制 (MA60): ${ma60:.2f}")
-        else: support_list.append(f"季线重要均线支撑 (MA60): ${ma60:.2f}")
+        if ma60 > cur_price:
+            resistance_list.append(f"季线重要均线压制 (MA60): ${ma60:.2f}")
+        else:
+            support_list.append(f"季线重要均线支撑 (MA60): ${ma60:.2f}")
 
     if ma120:
-        if ma120 > cur_price: resistance_list.append(f"半年线重要均线压制 (MA120): ${ma120:.2f}")
-        else: support_list.append(f"半年线重要均线支撑 (MA120): ${ma120:.2f}")
+        if ma120 > cur_price:
+            resistance_list.append(f"半年线重要均线压制 (MA120): ${ma120:.2f}")
+        else:
+            support_list.append(f"半年线重要均线支撑 (MA120): ${ma120:.2f}")
 
     if ma250:
-        if ma250 > cur_price: resistance_list.append(f"年线长线牛熊压制 (MA250): ${ma250:.2f}")
-        else: support_list.append(f"年线长线牛熊支撑 (MA250): ${ma250:.2f}")
+        if ma250 > cur_price:
+            resistance_list.append(f"年线长线牛熊压制 (MA250): ${ma250:.2f}")
+        else:
+            support_list.append(f"年线长线牛熊支撑 (MA250): ${ma250:.2f}")
 
     for idx, cp in enumerate(chip_resistances):
         tag = "第1阶梯筹码阻力" if idx == 0 else "突破加速目标筹码峰" if idx == 1 else "历史大级别套牢顶"
@@ -508,9 +522,12 @@ if "current_data" in st.session_state and st.session_state.current_data:
     
     st.caption(f"⚡ 数据已智能缓存（刷新时间: {data['cache_display_time']} ｜ 5分钟内全员秒开无消耗）")
     
-    if "🔴" in data['market_status']: st.error(f"**大盘风控:** {data['market_status']}")
-    elif "⚠️" in data['market_status']: st.warning(f"**大盘风控:** {data['market_status']}")
-    else: st.success(f"**大盘风控:** {data['market_status']}")
+    if "🔴" in data['market_status']:
+        st.error(f"**大盘风控:** {data['market_status']}")
+    elif "⚠️" in data['market_status']:
+        st.warning(f"**大盘风控:** {data['market_status']}")
+    else:
+        st.success(f"**大盘风控:** {data['market_status']}")
     
     st.info(f"🌐 **宏观情绪与利率：** 【{data['macro_sentiment_tag']}】 ｜ {data['vix_status_str']} ｜ 🏛️ {data['tnx_status_str']}")
     
