@@ -47,7 +47,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置、密钥自动清洗与双通道 Gemini 智脑
+# 1. 基础配置、密钥清洗与专为 AQ. 密钥设计的双通道引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -95,6 +95,7 @@ def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
     
+    # 优先使用的 Gemini 模型列表
     models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     payload = {
         "contents": [{
@@ -102,7 +103,7 @@ def call_gemini_smart(prompt_text):
         }]
     }
 
-    # 通道 1：官方原生 REST API（Header 鉴权）
+    # 通道 1：官方原生 REST API（严格使用 x-goog-api-key 请求头，杜绝 401 OAuth 冲突）
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key
@@ -113,26 +114,30 @@ def call_gemini_smart(prompt_text):
             resp = requests.post(url, headers=headers, json=payload, timeout=25)
             if resp.status_code == 200:
                 res_json = resp.json()
-                parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                if parts and "text" in parts[0]:
-                    return parts[0]["text"]
+                candidates = res_json.get("candidates", [])
+                if candidates and "content" in candidates[0]:
+                    parts = candidates[0]["content"].get("parts", [])
+                    if parts and "text" in parts[0]:
+                        return parts[0]["text"]
         except Exception:
             pass
 
-    # 通道 2：官方原生 REST API（URL 参数鉴权）
+    # 通道 2：URL 参数直接传 Key
     for m in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=25)
             if resp.status_code == 200:
                 res_json = resp.json()
-                parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                if parts and "text" in parts[0]:
-                    return parts[0]["text"]
+                candidates = res_json.get("candidates", [])
+                if candidates and "content" in candidates[0]:
+                    parts = candidates[0]["content"].get("parts", [])
+                    if parts and "text" in parts[0]:
+                        return parts[0]["text"]
         except Exception:
             pass
 
-    # 通道 3：官方 SDK 方式
+    # 通道 3：SDK 模式尝试
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -142,7 +147,7 @@ def call_gemini_smart(prompt_text):
     except Exception as e:
         return f"⚠️ 智脑调用异常: `{e}`"
         
-    return "⚠️ 生成失败，请确认 Streamlit Secrets 中的 API Key 填写无误。"
+    return "⚠️ 生成失败，请确认 Streamlit Secrets 中的 API Key 权限。"
 
 # ----------------------------------------------------
 # 2. Moomoo 账户与交易核心连接模块
