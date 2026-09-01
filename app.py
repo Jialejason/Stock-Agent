@@ -14,7 +14,9 @@ from ta.trend import EMAIndicator, MACD, SMAIndicator
 from ta.volatility import AverageTrueRange
 import yfinance as yf
 
-# 尝试导入 Moomoo API
+# ----------------------------------------------------
+# 0. Moomoo API 兼容性与安全垫片导入
+# ----------------------------------------------------
 try:
     from moomoo import (
         OpenSecTradeContext, OpenQuoteContext,
@@ -22,9 +24,24 @@ try:
         KLType, SubType
     )
     MOOMOO_AVAILABLE = True
-except ImportError:
+except Exception:
     MOOMOO_AVAILABLE = False
+    # 安全防爆垫片：在 Streamlit Cloud 或未装库环境防止抛出 NameError
+    class TrdEnv:
+        SIMULATE = "SIMULATE"
+        REAL = "REAL"
+    class TrdMarket:
+        US = "US"
+    class SecurityFirm:
+        FUTUSECURITIES = "FUTUSECURITIES"
+    class TrdSide:
+        BUY = "BUY"
+        SELL = "SELL"
+    class OrderType:
+        NORMAL = "NORMAL"
+        MARKET = "MARKET"
 
+# 页面基础配置
 st.set_page_config(page_title="Moomoo 智能量化交易 & AI投顾终端 Pro Max", page_icon="⚡", layout="wide")
 st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
@@ -82,7 +99,8 @@ def call_gemini_smart(prompt_text):
             try:
                 model = genai.GenerativeModel(m_name)
                 res = model.generate_content(prompt_text)
-                if res and res.text: return res.text
+                if res and res.text:
+                    return res.text
             except Exception:
                 continue
         return "⚠️ 调用 Gemini 模型失败，请确认 API Key 权限。"
@@ -97,7 +115,12 @@ def get_moomoo_contexts(host="127.0.0.1", port=11111):
     if not MOOMOO_AVAILABLE:
         return None, None
     try:
-        trd = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=host, port=port, security_firm=SecurityFirm.FUTUSECURITIES)
+        trd = OpenSecTradeContext(
+            filter_trdmarket=TrdMarket.US,
+            host=host,
+            port=port,
+            security_firm=SecurityFirm.FUTUSECURITIES
+        )
         quote = OpenQuoteContext(host=host, port=port)
         return trd, quote
     except Exception:
@@ -108,6 +131,8 @@ def record_trade_log(action, symbol, detail):
         st.session_state.trade_audit_logs = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.session_state.trade_audit_logs.insert(0, {"时间": now, "操作": action, "标的": symbol, "详细信息": detail})
+    if len(st.session_state.trade_audit_logs) > 50:
+        st.session_state.trade_audit_logs.pop()
 
 # ----------------------------------------------------
 # 3. 机构微观结构与基本面计算 (Volume Profile, Options, Fundamentals)
@@ -135,7 +160,8 @@ def calculate_institutional_volume_profile(df_daily, bins=40):
     for idx in sorted_indices:
         accum_vol += vol_profile[idx]
         va_indices.append(idx)
-        if accum_vol >= target_vol: break
+        if accum_vol >= target_vol:
+            break
 
     val_price = float(bin_centers[min(va_indices)]) if va_indices else poc_price
     vah_price = float(bin_centers[max(va_indices)]) if va_indices else poc_price
@@ -153,7 +179,8 @@ def calculate_institutional_volume_profile(df_daily, bins=40):
 def fetch_options_microstructure(ticker_obj, cur_price):
     try:
         expirations = ticker_obj.options
-        if not expirations: return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
+        if not expirations:
+            return {"max_pain": 0.0, "pcr": 1.0, "major_call_wall": 0.0, "major_put_wall": 0.0}
         opt_chain = ticker_obj.option_chain(expirations[0])
         calls, puts = opt_chain.calls, opt_chain.puts
         total_call_oi = calls['openInterest'].fillna(0).sum()
@@ -248,7 +275,8 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 
     ticker_obj = yf.Ticker(ticker_input)
     df_daily = yf.download(ticker_input, period="2y", interval="1d", auto_adjust=True, progress=False)
-    if df_daily.empty: return None, f"未找到股票 [{ticker_input}] 的行情数据。"
+    if df_daily.empty:
+        return None, f"未找到股票 [{ticker_input}] 的行情数据。"
     if isinstance(df_daily.columns, pd.MultiIndex):
         df_daily.columns = df_daily.columns.get_level_values(0)
 
@@ -259,14 +287,16 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     low_30d = low_d.iloc[-min(30, total_days):].min()
     high_30d = high_d.iloc[-min(30, total_days):].max()
 
-    # VWAP
+    # VWAP 计算
     vwap_price = cur_price
     try:
         df_intraday = yf.download(ticker_input, period="1d", interval="5m", auto_adjust=True, progress=False)
         if not df_intraday.empty:
-            if isinstance(df_intraday.columns, pd.MultiIndex): df_intraday.columns = df_intraday.columns.get_level_values(0)
+            if isinstance(df_intraday.columns, pd.MultiIndex):
+                df_intraday.columns = df_intraday.columns.get_level_values(0)
             typical_p = (df_intraday['High'] + df_intraday['Low'] + df_intraday['Close']) / 3.0
-            if df_intraday['Volume'].sum() > 0: vwap_price = (typical_p * df_intraday['Volume']).sum() / df_intraday['Volume'].sum()
+            if df_intraday['Volume'].sum() > 0:
+                vwap_price = (typical_p * df_intraday['Volume']).sum() / df_intraday['Volume'].sum()
     except Exception:
         vwap_price = cur_price
 
@@ -329,7 +359,7 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 # 4. 侧边栏：环境与策略总控
 # ----------------------------------------------------
 st.sidebar.header("⚙️ 交易环境与网关配置")
-trd_env_choice = st.sidebar.radio("交易账户环境", ["模拟盘 (Paper Trading - 安全推荐)", "实盘 (REAL - 谨慎)"])
+trd_env_choice = st.sidebar.radio("交易账户环境", ["模拟盘 (Paper Trading - 推荐)", "实盘 (REAL - 谨慎)"])
 active_trd_env = TrdEnv.SIMULATE if "模拟" in trd_env_choice else TrdEnv.REAL
 
 opend_host = st.sidebar.text_input("OpenD IP", value="127.0.0.1")
@@ -362,7 +392,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # ==================== TAB 1: 量化交易执行与看板 ====================
 with tab1:
     if not trd_ctx:
-        st.error("⚠️ 未连接到 Moomoo OpenD 网关，请确认 OpenD 已在后台运行。")
+        st.warning("⚠️ 未连接到本地 Moomoo OpenD 网关。若在云端运行仅供研报分析；若在本地，请确保 OpenD.exe 处于运行状态。")
     else:
         # 1. 资产总览
         ret_acc, acc_df = trd_ctx.accinfo_query(trd_env=active_trd_env)
@@ -493,6 +523,8 @@ with tab2:
                         safe_render_markdown(diag_data['ai_analysis_text'])
         else:
             st.info("当前账户无持仓股票。")
+    else:
+        st.info("连接到本地 OpenD 后可自动读取持仓生成研报。")
 
 # ==================== TAB 3: 单股深度全维诊断 ====================
 with tab3:
@@ -524,7 +556,7 @@ with tab4:
     else:
         st.caption("暂无交易日志记录。")
 
-# 自动轮询机制
+# 自动轮询机制（全自动开启时每 10 秒刷新一次页面）
 if auto_trade_enabled:
     time.sleep(10)
     st.rerun()
