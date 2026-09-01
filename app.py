@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import requests
 import streamlit as st
 from ta.momentum import RSIIndicator
@@ -173,14 +175,14 @@ def record_trade_log(action, symbol, detail):
         st.session_state.trade_audit_logs.pop()
 
 # ----------------------------------------------------
-# 3. 机构微观结构与基本面计算 (Volume Profile, Options, Fundamentals)
+# 3. 机构微观结构、图表与基本面计算
 # ----------------------------------------------------
 def calculate_institutional_volume_profile(df_daily, bins=40):
     if df_daily.empty or 'Close' not in df_daily.columns or 'Volume' not in df_daily.columns:
-        return {"poc": 0.0, "vah": 0.0, "val": 0.0, "resistances": [], "supports": []}
+        return {"poc": 0.0, "vah": 0.0, "val": 0.0, "resistances": [], "supports": [], "bin_centers": [], "vol_profile": []}
     price_min, price_max = df_daily['Low'].min(), df_daily['High'].max()
     if price_max <= price_min or np.isnan(price_min) or np.isnan(price_max):
-        return {"poc": 0.0, "vah": 0.0, "val": 0.0, "resistances": [], "supports": []}
+        return {"poc": 0.0, "vah": 0.0, "val": 0.0, "resistances": [], "supports": [], "bin_centers": [], "vol_profile": []}
 
     bin_edges = np.linspace(price_min, price_max, bins + 1)
     vol_profile = np.zeros(bins)
@@ -211,8 +213,51 @@ def calculate_institutional_volume_profile(df_daily, bins=40):
     return {
         "poc": poc_price, "vah": vah_price, "val": val_price,
         "resistances": [round(p, 2) for p in res_bins[:3]],
-        "supports": [round(p, 2) for p in sup_bins[:2]]
+        "supports": [round(p, 2) for p in sup_bins[:2]],
+        "bin_centers": bin_centers.tolist(),
+        "vol_profile": vol_profile.tolist()
     }
+
+def plot_microstructure_chart(df_daily, symbol, cur_price, vp_data, sl_price, tp_price):
+    try:
+        recent_df = df_daily.iloc[-90:].copy()
+        fig = make_subplots(
+            rows=1, cols=2, shared_yaxes=True,
+            column_widths=[0.8, 0.2], horizontal_spacing=0.03,
+            subplot_titles=(f"📈 {symbol} 90日 K线与攻防矩阵", "📊 筹码分布 (VP)")
+        )
+
+        # K 线
+        fig.add_trace(go.Candlestick(
+            x=recent_df.index,
+            open=recent_df['Open'], high=recent_df['High'],
+            low=recent_df['Low'], close=recent_df['Close'],
+            name="K线"
+        ), row=1, col=1)
+
+        # 止损止盈标线
+        fig.add_hline(y=sl_price, line_dash="dash", line_color="red", annotation_text=f"防守止损: ${sl_price:.2f}", row=1, col=1)
+        fig.add_hline(y=tp_price, line_dash="dash", line_color="green", annotation_text=f"目标止盈: ${tp_price:.2f}", row=1, col=1)
+        fig.add_hline(y=vp_data["poc"], line_color="orange", annotation_text=f"POC筹码峰: ${vp_data['poc']:.2f}", row=1, col=1)
+
+        # 筹码分布横向直方图
+        if vp_data["bin_centers"] and vp_data["vol_profile"]:
+            fig.add_trace(go.Bar(
+                x=vp_data["vol_profile"],
+                y=vp_data["bin_centers"],
+                orientation='h',
+                marker_color='rgba(100, 149, 237, 0.6)',
+                name="筹码柱"
+            ), row=1, col=2)
+
+        fig.update_layout(
+            height=420, margin=dict(l=10, r=10, t=30, b=10),
+            showlegend=False, xaxis_rangeslider_visible=False,
+            template="plotly_dark"
+        )
+        return fig
+    except Exception:
+        return None
 
 def fetch_options_microstructure(ticker_obj, cur_price):
     try:
@@ -253,7 +298,6 @@ def fetch_fundamental_and_analyst_data(ticker_obj):
             if abs(val) >= 1e6: return f"${val/1e6:.2f}M"
             return f"${val:.2f}"
 
-        # 尝试获取财报日期预警
         earnings_date_str = "未公布"
         try:
             cal = ticker_obj.calendar
@@ -299,6 +343,7 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     spy_info_str, qqq_info_str = "SPY: 正常", "QQQ: 正常"
     vix_status_str, tnx_status_str = "正常", "正常"
     macro_sentiment_tag = "🟢 情绪向好"
+    macro_score = 30
 
     try:
         if not macro_data.empty:
@@ -324,8 +369,10 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 
             if (spy_close < spy_ema20 and qqq_close < qqq_ema20) or vix_close >= 25:
                 market_status = "🔴 极度预警：标普与纳指双双破位EMA20，全市场防守！"
-            elif spy_close < spy_ema20: market_status = "⚠️ 警示：标普(SPY) 跌破生命线！"
-            elif qqq_close < qqq_ema20: market_status = "⚠️ 警示：纳指(QQQ) 跌破生命线！"
+                macro_score = 5
+            elif spy_close < spy_ema20 or qqq_close < qqq_ema20:
+                market_status = "⚠️ 警示：核心指数跌破生命线！"
+                macro_score = 15
     except Exception:
         pass
 
@@ -377,6 +424,12 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     dynamic_stop_loss = max(low_30d, cur_price - (1.5 * atr_d))
     rr_ratio = max(0.01, target1_p - cur_price) / max(0.01, cur_price - dynamic_stop_loss)
 
+    # 量化多空总分测算 (0-100)
+    tech_score = 25 if cur_price > ema20 else 10
+    vwap_score = 20 if cur_price > vwap_price else 5
+    opt_score = 15 if opt_data['pcr'] < 0.9 else 5
+    total_quant_score = macro_score + tech_score + vwap_score + opt_score
+
     position_context = f"【当前持仓】持仓成本价: ${user_cost:.2f} | 持仓数量: {user_qty} 股 | 浮动盈亏: {((cur_price-user_cost)/user_cost*100):+.2f}%" if user_qty > 0 else "【当前状态】空仓观望中（寻找右侧入场契机）"
 
     layered_prompt = f"""
@@ -388,7 +441,7 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
 - 指数标尺: {spy_info_str} ｜ {qqq_info_str} ｜ {vix_status_str} ｜ {tnx_status_str}
 
 【个股技术面与趋势阵地】
-- 标的代码: {ticker_input} ｜ 最新市价: **${cur_price:.2f}**
+- 标的代码: {ticker_input} ｜ 最新市价: **${cur_price:.2f}** ｜ 量化多空总分: **{total_quant_score}/100**
 - 均线矩阵: EMA5: **${ema5:.2f}** ｜ EMA10: **${ema10:.2f}** ｜ EMA20(生命线): **${ema20:.2f}** ｜ MA50: **${ma50:.2f}** ｜ MA200: {f"${ma200:.2f}" if ma200 else '无'}
 - 均线态势: {cross_status}
 - 波动率与保护止损: 14日ATR: **${atr_d:.2f}** ｜ 30日低点: **${low_30d:.2f}** ｜ 动态保护止损: **${dynamic_stop_loss:.2f}**
@@ -438,6 +491,8 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     ai_analysis_text = call_gemini_smart(layered_prompt)
     now_display = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%H:%M:%S")
 
+    chart_fig = plot_microstructure_chart(df_daily, ticker_input, cur_price, vp_data, dynamic_stop_loss, target1_p)
+
     return {
         "symbol": ticker_input, "cur_price": cur_price, "market_status": market_status,
         "spy_info_str": spy_info_str, "qqq_info_str": qqq_info_str, "macro_sentiment_tag": macro_sentiment_tag,
@@ -445,7 +500,8 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
         "ema5": ema5, "ema20": ema20, "ma50": ma50, "ma200_str": f"${ma200:.2f}" if ma200 else "无",
         "cross_status": cross_status, "atr_d": atr_d, "dynamic_stop_loss": dynamic_stop_loss,
         "vp_data": vp_data, "opt_data": opt_data, "funda_data": funda_data,
-        "rr_ratio": rr_ratio, "target1_p": target1_p, "ai_analysis_text": ai_analysis_text,
+        "rr_ratio": rr_ratio, "target1_p": target1_p, "total_quant_score": total_quant_score,
+        "chart_fig": chart_fig, "ai_analysis_text": ai_analysis_text,
         "cache_display_time": now_display
     }, None
 
@@ -609,6 +665,8 @@ with tab2:
                     if d_err:
                         st.error(d_err)
                     else:
+                        if diag_data['chart_fig']:
+                            st.plotly_chart(diag_data['chart_fig'], use_container_width=True)
                         safe_render_markdown(diag_data['ai_analysis_text'])
         else:
             st.info("当前账户无持仓股票。")
@@ -629,12 +687,20 @@ with tab3:
     if "current_diag" in st.session_state:
         d = st.session_state.current_diag
         st.caption(f"⚡ 数据已缓存 (刷新时间: {d['cache_display_time']})")
-        c1, c2, c3, c4 = st.columns(4)
+        
+        # 顶栏核心数据与量化胜率得分
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric(f"{d['symbol']} 现价", f"${d['cur_price']:.2f}")
         c2.metric("做市商 VWAP", f"${d['vwap_price']:.2f}")
         c3.metric("动态盈亏比", f"{d['rr_ratio']:.2f}:1")
         c4.metric("动态保护止损", f"${d['dynamic_stop_loss']:.2f}")
+        c5.metric("量化战斗力得分", f"{d['total_quant_score']}/100")
 
+        # 交互式 K线 + Volume Profile 攻防图
+        if d['chart_fig']:
+            st.plotly_chart(d['chart_fig'], use_container_width=True)
+
+        # 深度研报正文
         safe_render_markdown(d['ai_analysis_text'])
 
 # ==================== TAB 4: 审计与预警日志 ====================
