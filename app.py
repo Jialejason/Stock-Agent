@@ -102,7 +102,6 @@ def call_gemini_smart(prompt_text):
         }]
     }
 
-    # 1. 动态获取当前 API Key 真实支持的模型列表
     usable_models = []
     try:
         list_url = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -110,33 +109,26 @@ def call_gemini_smart(prompt_text):
         if resp_list.status_code == 200:
             all_models = resp_list.json().get("models", [])
             for item in all_models:
-                m_name = item.get("name", "")  # 格式如 "models/gemini-..."
+                m_name = item.get("name", "")
                 methods = item.get("supportedGenerationMethods", [])
                 if "generateContent" in methods:
-                    # 剥离 "models/" 前缀
-                    clean_name = m_name.replace("models/", "")
-                    usable_models.append(clean_name)
+                    usable_models.append(m_name.replace("models/", ""))
     except Exception:
         pass
 
-    # 若动态拉取失败，启用兜底队列
     if not usable_models:
         usable_models = [
             "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
             "gemini-1.5-flash",
             "gemini-1.5-flash-002",
-            "gemini-1.5-flash-001",
-            "gemini-1.5-pro",
-            "gemini-1.5-pro-002"
+            "gemini-1.5-pro"
         ]
 
-    # 2. 依次调用可用模型
     last_error = ""
     for m in usable_models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-            resp = requests.post(url, headers=headers, json=payload, timeout=25)
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
             if resp.status_code == 200:
                 res_json = resp.json()
                 candidates = res_json.get("candidates", [])
@@ -366,25 +358,63 @@ def fetch_and_analyze(ticker_input, user_cost=0.0, user_qty=0):
     dynamic_stop_loss = max(low_30d, cur_price - (1.5 * atr_d))
     rr_ratio = max(0.01, target1_p - cur_price) / max(0.01, cur_price - dynamic_stop_loss)
 
-    position_context = f"【持仓数据】成本: ${user_cost:.2f} | 股数: {user_qty}" if user_qty > 0 else "【当前状态】空仓观望中"
+    position_context = f"【当前持仓】持仓成本价: ${user_cost:.2f} | 持仓数量: {user_qty} 股 | 浮动盈亏: {((cur_price-user_cost)/user_cost*100):+.2f}%" if user_qty > 0 else "【当前状态】空仓观望中（寻找右侧入场契机）"
 
     layered_prompt = f"""
-你是一名华尔街顶级量化操盘手兼首席投研导师。
-标的: {ticker_input} ｜ 最新价: **${cur_price:.2f}** ｜ 大盘: {market_status}
-均线: EMA5: **${ema5:.2f}** ｜ EMA20: **${ema20:.2f}** ｜ MA50: **${ma50:.2f}** ｜ MA200: {f"${ma200:.2f}" if ma200 else '无'}
-微观与期权: 做市商VWAP: **${vwap_price:.2f}** ｜ POC筹码峰: **${vp_data['poc']:.2f}** ｜ 期权Max Pain: **${opt_data['max_pain']:.2f}**
-基本面: 市值: {funda_data['market_cap']} ｜ 做空比例: {funda_data['short_ratio_float']} ｜ 盈亏比: **{rr_ratio:.2f}:1**
-{position_context}
+你是一名华尔街对冲基金资深首席宏观量化操盘手兼个人私人首席投资顾问。
+请根据以下全维微观结构、衍生品博弈与基本面数据，为我生成一份**极其详尽、条理严谨、直击要害**的顶级实战研报：
 
-请严格按以下 3 个大白话模块输出专业操盘手册：
-### 🚦 1. 操盘手 3 秒极简决策灯
-核心操作定性与一句话理由。
-### 🛡️ 2. 攻防阶梯价格阵地
-- 建议防守止损价（结合 **${dynamic_stop_loss:.2f}**）
-- 第一止盈目标价（结合 **${target1_p:.2f}**）
-- 关键阻力与支撑区间
-### 🧠 3. 交易算账与操盘指令
-做多与减仓条件，并以一句话收尾。
+【宏观与市场环境】
+- 宏观定性: {market_status}
+- 指数标尺: {spy_info_str} ｜ {qqq_info_str} ｜ {vix_status_str} ｜ {tnx_status_str}
+
+【个股技术面与趋势阵地】
+- 标的代码: {ticker_input} ｜ 最新市价: **${cur_price:.2f}**
+- 均线矩阵: EMA5: **${ema5:.2f}** ｜ EMA10: **${ema10:.2f}** ｜ EMA20(生命线): **${ema20:.2f}** ｜ MA50: **${ma50:.2f}** ｜ MA200: {f"${ma200:.2f}" if ma200 else '无'}
+- 均线态势: {cross_status}
+- 波动率与保护止损: 14日ATR: **${atr_d:.2f}** ｜ 30日低点: **${low_30d:.2f}** ｜ 动态保护止损: **${dynamic_stop_loss:.2f}**
+
+【机构筹码与微观结构 (Volume Profile & Derivatives)】
+- 做市商日内 VWAP: **${vwap_price:.2f}** ({vwap_status_desc})
+- 机构成交量筹码峰 (POC): **${vp_data['poc']:.2f}** ｜ 价值区上沿(VAH): **${vp_data['vah']:.2f}** ｜ 价值区下沿(VAL): **${vp_data['val']:.2f}**
+- 关键阻力阵地: {', '.join([f'${p:.2f}' for p in vp_data['resistances']]) if vp_data['resistances'] else '上方筹码真空'}
+- 关键支撑阵地: {', '.join([f'${p:.2f}' for p in vp_data['supports']]) if vp_data['supports'] else f'下方防守点位: ${dynamic_stop_loss:.2f}'}
+- 期权微观博弈: 期权最大痛点 (Max Pain): **${opt_data['max_pain']:.2f}** ｜ Put/Call Ratio: **{opt_data['pcr']:.2f}** ｜ 主要 Call Wall: **${opt_data['major_call_wall']:.2f}** ｜ 主要 Put Wall: **${opt_data['major_put_wall']:.2f}**
+
+【基本面与做空微观结构】
+- 市值: {funda_data['market_cap']} ｜ 现金储备: {funda_data['total_cash']} ｜ 经营现金流: {funda_data['operating_cash_flow']} ｜ 净利润: {funda_data['net_income_ttm']}
+- 估值: 市盈率 P/E: {funda_data['pe_ttm']} ｜ 市销率 P/S: {funda_data['ps_ttm']}
+- 空头结构: 做空流通股比例: **{funda_data['short_ratio_float']}** ｜ 空头回补天数: **{funda_data['short_days_to_cover']} 天**
+- 华尔街投行评级: {funda_data['recommendation_key']} (共 {funda_data['num_analysts']} 家机构) ｜ 平均目标价: {f"${funda_data['target_mean']:.2f}" if funda_data['target_mean'] else 'N/A'} (最高: {f"${funda_data['target_high']:.2f}" if funda_data['target_high'] else 'N/A'} / 最低: {f"${funda_data['target_low']:.2f}" if funda_data['target_low'] else 'N/A'})
+
+【用户实盘仓位背景】
+- {position_context}
+- 动态预期第一止盈目标: **${target1_p:.2f}** ｜ 动态盈亏比: **{rr_ratio:.2f}:1**
+
+---
+请按照以下 5 大核心模块输出极具深度、干货满满的华尔街量化实操研报：
+
+### 🚦 模块一：首席操盘手 3 秒极简决策灯
+- 核心操作定性（【极度看多 / 偏多试探 / 中性观望 / 偏空防守 / 坚决离场】）
+- 1句话直击要害的核心底层逻辑（必须结合大盘顺逆风与个股做市商 VWAP/均线生命线）。
+
+### 📊 模块二：机构微观筹码与衍生品深度博弈
+- **筹码分布 (Volume Profile)**：深度剖析现价与 POC 筹码峰、价值区 (VAH/VAL) 的相对位置，评估套牢盘与获利盘的承压结构。
+- **期权 Max Pain 与多空对冲**：解析期权最大痛点和 Call/Put Wall 阻力对股价的牵引力或压制力。
+- **空头回补与轧空可能**：结合 Short Ratio 与回补天数评估是否存在轧空 (Short Squeeze) 契机。
+
+### 🛡️ 模块三：攻防阶梯与价格阵地
+- **建议防守止损线**：明确给出绝对防守价位与跌破执行条件（结合 ATR 与关键支撑）。
+- **阶梯止盈阵地**：明确给出 TP1（第一目标）、TP2（强阻力目标）及对应锁利比例。
+- **支撑与阻力矩阵**：列出清晰的强弱支撑区间与强阻力区间。
+
+### 🧠 模块四：实操算账与量化执行指令（根据用户持仓量身定制）
+- **右侧建仓/加仓触发条件**（价格突破何处、成交量需要达到什么标准）。
+- **左侧防守/减仓/止损执行条件**。
+- **仓位管理建议**（单笔仓位上限与风控配比）。
+
+### 🎯 模块五：操盘手收尾心法
+- 用一两句精辟的专业交易心法收尾，指引长周期理性博弈。
 """
     ai_analysis_text = call_gemini_smart(layered_prompt)
     now_display = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%H:%M:%S")
