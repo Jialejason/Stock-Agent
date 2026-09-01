@@ -4,7 +4,6 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-import google.generativeai as genai
 import numpy as np
 import pandas as pd
 import requests
@@ -47,7 +46,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置、密钥清洗与专为 AQ. 密钥设计的双通道引擎
+# 1. 基础配置、密钥清洗与专属 AQ. REST 通信引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -65,7 +64,7 @@ def safe_render_markdown(text):
         return
     st.markdown(text.replace("$", "\\$"))
 
-# 严苛自动清洗 API Key（过滤换行、转义符、两端空格与多余引号）
+# 严苛自动清洗 API Key
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = str(raw_api_key).strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
 
@@ -95,19 +94,19 @@ def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
     
-    # 优先使用的 Gemini 模型列表
+    # 针对 Google 新版 AQ. 格式专用的 Header 原生调用
     models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key  # 严格仅使用 x-goog-api-key，禁止带 Authorization 和 URL key
+    }
     payload = {
         "contents": [{
             "parts": [{"text": prompt_text}]
         }]
     }
 
-    # 通道 1：官方原生 REST API（严格使用 x-goog-api-key 请求头，杜绝 401 OAuth 冲突）
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key
-    }
+    last_error = ""
     for m in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
@@ -119,35 +118,14 @@ def call_gemini_smart(prompt_text):
                     parts = candidates[0]["content"].get("parts", [])
                     if parts and "text" in parts[0]:
                         return parts[0]["text"]
-        except Exception:
-            pass
+            else:
+                err_data = resp.json().get("error", {})
+                last_error = f"{resp.status_code} - {err_data.get('message', resp.text)}"
+        except Exception as e:
+            last_error = str(e)
+            continue
 
-    # 通道 2：URL 参数直接传 Key
-    for m in models:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=25)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                candidates = res_json.get("candidates", [])
-                if candidates and "content" in candidates[0]:
-                    parts = candidates[0]["content"].get("parts", [])
-                    if parts and "text" in parts[0]:
-                        return parts[0]["text"]
-        except Exception:
-            pass
-
-    # 通道 3：SDK 模式尝试
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        res = model.generate_content(prompt_text)
-        if res and res.text:
-            return res.text
-    except Exception as e:
-        return f"⚠️ 智脑调用异常: `{e}`"
-        
-    return "⚠️ 生成失败，请确认 Streamlit Secrets 中的 API Key 权限。"
+    return f"⚠️ 智脑调用异常: `{last_error}`"
 
 # ----------------------------------------------------
 # 2. Moomoo 账户与交易核心连接模块
