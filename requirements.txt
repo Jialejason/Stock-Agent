@@ -1,5 +1,8 @@
 streamlit
-yfinance
+requests
 pandas
+numpy
+yfinance
 ta
 google-generativeai
+plotly
