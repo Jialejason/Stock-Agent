@@ -26,7 +26,7 @@ try:
     MOOMOO_AVAILABLE = True
 except Exception:
     MOOMOO_AVAILABLE = False
-    # 安全防爆垫片：在 Streamlit Cloud 或未装库环境防止抛出 NameError
+    # 安全防爆垫片：在 Streamlit Cloud 或无 Moomoo 环境防止抛出 NameError
     class TrdEnv:
         SIMULATE = "SIMULATE"
         REAL = "REAL"
@@ -47,7 +47,7 @@ st.title("🛡️ Moomoo 智能量化交易 & AI投顾终端 Pro Max")
 st.caption("⚡ Moomoo 自动交易/风控 ｜ 📊 筹码与微观结构 ｜ 🛰️ 机会自动挖掘 ｜ 🎯 阶梯止盈止损 ｜ 📲 Pushover 实时告警")
 
 # ----------------------------------------------------
-# 1. 基础配置与 Pushover 推送模块
+# 1. 基础配置、密钥读取与 REST 原生双兼容引擎
 # ----------------------------------------------------
 TICKER_ALIASES = {
     "TESLA": "TSLA", "特斯拉": "TSLA",
@@ -66,7 +66,7 @@ def safe_render_markdown(text):
     st.markdown(text.replace("$", "\\$"))
 
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
-api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+api_key = raw_api_key.strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
 
 PUSHOVER_USER_KEY = st.secrets.get("PUSHOVER_USER_KEY", "") if "PUSHOVER_USER_KEY" in st.secrets else ""
 PUSHOVER_API_TOKEN = st.secrets.get("PUSHOVER_API_TOKEN", "") if "PUSHOVER_API_TOKEN" in st.secrets else ""
@@ -93,19 +93,51 @@ def send_pushover_alert(message, title="🛡️ 美股投顾量化预警", prior
 def call_gemini_smart(prompt_text):
     if not api_key:
         return "⚠️ 未检测到 API Key，请在 Streamlit Secrets 中配置 `GEMINI_API_KEY`。"
+    
+    # 优先采用 Google 官方原生 REST API（全面支持 AQ. 与 AIza 所有新老 Key 格式）
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+    ]
+    
+    for m in models_to_try:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{
+                    "parts": [{"text": prompt_text}]
+                }]
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=25)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                candidates = res_json.get("candidates", [])
+                if candidates and "content" in candidates[0]:
+                    parts = candidates[0]["content"].get("parts", [])
+                    if parts and "text" in parts[0]:
+                        return parts[0]["text"]
+            else:
+                err_data = resp.json().get("error", {})
+                err_msg = err_data.get("message", resp.text)
+                if "API_KEY_INVALID" in err_msg:
+                    return f"⚠️ API Key 认证无效: `{err_msg}`，请检查 Secrets 中填写的 Key。"
+        except Exception:
+            continue
+
+    # 备用：SDK 调用
     try:
         genai.configure(api_key=api_key)
-        for m_name in ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']:
-            try:
-                model = genai.GenerativeModel(m_name)
-                res = model.generate_content(prompt_text)
-                if res and res.text:
-                    return res.text
-            except Exception:
-                continue
-        return "⚠️ 调用 Gemini 模型失败，请确认 API Key 权限。"
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        res = model.generate_content(prompt_text)
+        if res and res.text:
+            return res.text
     except Exception as e:
         return f"⚠️ 智脑调用异常: `{e}`"
+        
+    return "⚠️ 生成失败，请检查网络或 API Key 权限。"
 
 # ----------------------------------------------------
 # 2. Moomoo 账户与交易核心连接模块
