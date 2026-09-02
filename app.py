@@ -50,7 +50,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 移动端卡片式样式注入
+# 移动端样式
 st.markdown("""
 <style>
     .metric-container {
@@ -75,7 +75,7 @@ st.markdown("""
 st.title("🛡️ Moomoo 智能量化控制台")
 
 # ----------------------------------------------------
-# 1. 基础配置与 Gemini / Pushover 通信引擎
+# 1. 基础配置与通信引擎
 # ----------------------------------------------------
 raw_api_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 api_key = str(raw_api_key).strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
@@ -157,7 +157,7 @@ def call_gemini_smart(prompt_text):
     return f"⚠️ 智脑调用异常: `{last_error}`"
 
 # ----------------------------------------------------
-# 2. Moomoo 数据获取与执行核心
+# 2. Moomoo 数据获取核心
 # ----------------------------------------------------
 def get_moomoo_account_data(host="127.0.0.1", port=11111, trd_env=TrdEnv.SIMULATE):
     if not MOOMOO_AVAILABLE:
@@ -178,14 +178,6 @@ def get_moomoo_account_data(host="127.0.0.1", port=11111, trd_env=TrdEnv.SIMULAT
         return True, acc_info, positions, "OK"
     except Exception as e:
         return False, None, pd.DataFrame(), str(e)
-
-def record_trade_log(action, symbol, detail):
-    if "trade_audit_logs" not in st.session_state:
-        st.session_state.trade_audit_logs = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.session_state.trade_audit_logs.insert(0, {"时间": now, "操作": action, "标的": symbol, "详细信息": detail})
-    if len(st.session_state.trade_audit_logs) > 30:
-        st.session_state.trade_audit_logs.pop()
 
 # ----------------------------------------------------
 # 3. 筹码与量化算法模块
@@ -407,20 +399,15 @@ with st.sidebar:
     opend_host = st.text_input("OpenD Host", value="127.0.0.1")
     opend_port = st.number_input("OpenD Port", value=11111, step=1)
 
-    st.divider()
-    auto_trade_enabled = st.toggle("⚡ 自动风控/止盈止损", value=False)
-    tp_ratio = st.slider("止盈目标 (%)", 1.0, 30.0, 8.0, 0.5) / 100.0
-    sl_ratio = st.slider("止损阈值 (%)", 1.0, 20.0, 4.0, 0.5) / 100.0
-
 # ----------------------------------------------------
-# 5. 单页核心监控流（无 Tab 架构）
+# 5. 单页核心监控与量化分析流
 # ----------------------------------------------------
 success, acc_info, pos_df, err_msg = get_moomoo_account_data(host=opend_host, port=int(opend_port), trd_env=active_trd_env)
 
 if not success or acc_info is None:
     st.warning(f"⚠️ 无法连接到本地 Moomoo OpenD 网关 ({err_msg})，请确保电脑端 OpenD 客户端处于登录运行状态。")
 else:
-    # 1. 资产卡片看板
+    # 1. 资产看板卡片
     total_assets = acc_info.get("total_assets", 0.0)
     cash_val = acc_info.get("cash", 0.0)
     mkt_val = acc_info.get("market_val", 0.0)
@@ -453,30 +440,6 @@ else:
                 use_container_width=True,
                 hide_index=True
             )
-
-            # 自动风控止盈止损执行
-            if auto_trade_enabled:
-                for _, r in active_p.iterrows():
-                    code, qty, cost, curr = r['code'], int(r['qty']), r['cost_price'], r['nominal_price']
-                    p_ratio = (curr - cost) / cost
-                    if p_ratio >= tp_ratio:
-                        try:
-                            trd_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=opend_host, port=int(opend_port), security_firm=SecurityFirm.FUTUINC)
-                            trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
-                            trd_ctx.close()
-                            record_trade_log("自动止盈", code, f"收益率: +{p_ratio*100:.2f}%")
-                            send_pushover_alert(f"【止盈触发】{code} 自动卖出，收益率 +{p_ratio*100:.2f}%")
-                        except Exception:
-                            pass
-                    elif p_ratio <= -sl_ratio:
-                        try:
-                            trd_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=opend_host, port=int(opend_port), security_firm=SecurityFirm.FUTUINC)
-                            trd_ctx.place_order(price=curr, qty=qty, code=code, trd_side=TrdSide.SELL, order_type=OrderType.MARKET, trd_env=active_trd_env)
-                            trd_ctx.close()
-                            record_trade_log("自动止损", code, f"亏损率: {p_ratio*100:.2f}%")
-                            send_pushover_alert(f"【止损触发】{code} 自动卖出，亏损率 {p_ratio*100:.2f}%")
-                        except Exception:
-                            pass
         else:
             st.info("当前账户暂无持仓。")
     else:
@@ -484,11 +447,11 @@ else:
 
     st.markdown("---")
 
-    # 3. 实时 AI 投顾深度诊断（折叠展开）
-    with st.expander("🧠 AI 投顾研报诊断 & 筹码图", expanded=False):
+    # 3. 实时 AI 投顾深度诊断 & 筹码量化分析
+    with st.expander("🧠 AI 投顾研报诊断 & 筹码量化分析", expanded=True):
         default_sym = held_codes[0].replace("US.", "") if held_codes else "NVDA"
         diag_symbol = st.text_input("输入待诊断美股代码", value=default_sym).strip().upper()
-        if st.button("🚀 生成深度研报", type="primary", use_container_width=True):
+        if st.button("🚀 生成深度量化研报", type="primary", use_container_width=True):
             with st.spinner("AI 正在分析微观筹码与市场结构..."):
                 diag_res, err_msg = fetch_and_analyze(diag_symbol)
                 if err_msg:
@@ -506,7 +469,7 @@ else:
                 st.plotly_chart(d['chart_fig'], use_container_width=True)
             safe_render_markdown(d['ai_analysis_text'])
 
-    # 4. 手动快捷交易面板（折叠区）
+    # 4. 模拟盘快捷交易面板
     with st.expander("⚡ 模拟快捷下单", expanded=False):
         c_code, c_side = st.columns(2)
         m_code = c_code.text_input("代码", value="US.SOXS")
@@ -527,21 +490,8 @@ else:
                 trd_ctx.close()
                 if ret_o == 0:
                     st.success(f"下单成功！订单号: {res_o['order_id'].iloc[0]}")
-                    record_trade_log("手动下单", m_code, f"{m_side} {m_qty}股 @ ${m_price:.2f}")
                     st.rerun()
                 else:
                     st.error(f"下单失败: {res_o}")
             except Exception as e:
                 st.error(f"下单异常: {e}")
-
-    # 5. 审计流水（折叠区）
-    with st.expander("📋 交易流水记录", expanded=False):
-        if "trade_audit_logs" in st.session_state and st.session_state.trade_audit_logs:
-            st.dataframe(pd.DataFrame(st.session_state.trade_audit_logs), use_container_width=True, hide_index=True)
-        else:
-            st.caption("暂无交易日志记录。")
-
-# 自动轮询执行
-if auto_trade_enabled:
-    time.sleep(10)
-    st.rerun()
